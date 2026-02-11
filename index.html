@@ -499,24 +499,30 @@
       const C = mapToScreen(tip.x, tip.y);
       const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
 
-      if(mode === MODE.READY && bootState === BOOT.PLAY){
-        if(ang >= STRAIGHT_DEG) leftWasStraight = true;
+// ✅ 允许击发条件：
+// 1) 必须是 READY（不是 CAL）
+// 2) 若已进入 PLAY：随时可击发
+// 3) 若还没进入 PLAY：必须 lockReady=true 才允许“第一枪”击发
+    const allowFire = (mode === MODE.READY) && (bootState === BOOT.PLAY || lockReady);
 
-        if(leftWasStraight && ang <= BENT_DEG){
-          bentFrameCount++;
-          if(bentFrameCount >= BENT_FRAMES_NEED){
-            bentFrameCount = 0;
-            leftWasStraight = false;
-            fire();
-          }
-        } else {
+    if(allowFire){
+      if(ang >= STRAIGHT_DEG) leftWasStraight = true;
+
+      if(leftWasStraight && ang <= BENT_DEG){
+        bentFrameCount++;
+        if(bentFrameCount >= BENT_FRAMES_NEED){
           bentFrameCount = 0;
+          leftWasStraight = false;
+          fire();
         }
       } else {
-        // 引导阶段/非PLAY：不触发击发（但允许你按“校准”）
-        leftWasStraight = false;
         bentFrameCount = 0;
       }
+    } else {
+      leftWasStraight = false;
+      bentFrameCount = 0;
+    }
+
 
       // Calibration uses RIGHT tip stability
       if(mode === MODE.CAL){
