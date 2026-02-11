@@ -33,12 +33,12 @@
 </head>
 <body>
   <div id="hud">
-    <div><b>Finger Rifle</b> <span class="muted">右手食指瞄准 · 弯曲=扣枪</span></div>
+    <div><b>Finger Rifle</b> <span class="muted">左手掌移动瞄准 · 右手食指弯曲=发射</span></div>
     <span id="status" class="pill">加载中…</span>
     <button id="btnCal">校准：当前准星=靶心</button>
     <button id="btnClear">清空轨迹</button>
     <button id="btnFlip">切换前/后摄像头</button>
-    <span class="muted">提示：距离 10–30cm、手放画面中央更稳。</span>
+    <span class="muted">提示：前置自拍时，画面左边=你的右手；画面右边=你的左手。</span>
   </div>
   <div id="log"></div>
 
@@ -75,34 +75,28 @@
     // ===== 摄像头 =====
     let facingMode = 'user';
 
-    // =========================
-    // ✅ 10m 气步枪靶子（视觉近似）
-    // - 多个细环线
-    // - 中心黑区（10环黑心）
-    // =========================
-    const ringCount = 10;       // 10~1
-    const ringStep  = 18;       // 每环间距（px）——你觉得太大/小就改这里
-    const ringLine  = 2;        // 环线粗细
-    const blackCoreRings = 2.2; // ✅ 黑区半径=多少“环距”（经验值：2.0~2.6像10m AR 黑区感觉）
+    // ===== 10m 气步枪靶（近似）=====
+    const ringCount = 10;
+    const ringStep  = 12;
+    const ringLine  = 2;
+    const blackCoreRings = 2.2; // 黑心大小（2.0~2.6）
 
-    // =========================
-    // ✅ 瞄准器（跟随手）——你的 GIF 风格
-    // - 去掉“内白圈”（你说不需要白边）
-    // =========================
+    // ===== 瞄准器（跟随左手掌）=====
     const sight_outer_r = 120;
     const sight_outer_w = 28;
     const sight_bar_w   = 8;
     const sight_bar_len = 40;
     const sight_bar_gap = 5;
     const sight_inner_black_r = 44;
-    const sight_inner_black_w = 14;
+    const sight_inner_black_w = 14; // ✅ 不画内白圈
 
-    // ===== 进枪轨迹 =====
+    // ===== 轨迹（蓝色）=====
     let trail = [];
     const trailMax = 220;
     const trailMinMove = 2.0;
+    const trailColor = 'rgba(30,136,229,0.55)'; // ✅ 蓝色线条（接近 #1E88E5）
 
-    // ===== 准星平滑 =====
+    // ===== 准星平滑（左手掌控制）=====
     let aimX=null, aimY=null;
     const followAlpha = 0.22;
     let sensitivity = 1.05;
@@ -110,13 +104,14 @@
     // ===== 校准偏移 =====
     let calOffX = 0, calOffY = 0;
 
-    // ===== 扣枪（食指弯曲）=====
+    // ===== 发射：右手食指弯曲触发 =====
     const STRAIGHT_DEG = 165;
     const BENT_DEG     = 110;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
-    let wasStraight = false;
+    let rightWasStraight = false;
 
+    // ===== 成绩 =====
     let shots = [];
     function logShot(s){
       shots.unshift(s);
@@ -127,6 +122,7 @@
       }).join('<br>');
     }
 
+    // ===== 工具：角度 A-B-C（B点角度）=====
     function angleDeg(ax,ay,bx,by,cx,cy){
       const abx=ax-bx, aby=ay-by;
       const cbx=cx-bx, cby=cy-by;
@@ -138,9 +134,10 @@
       return Math.acos(cos) * 180/Math.PI;
     }
 
+    // ===== 归一化 -> 屏幕坐标 =====
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
-      if(facingMode==='user') x = 1-x;
+      if(facingMode==='user') x = 1-x; // 前置镜像更符合直觉
       let px = x*W + calOffX;
       let py = y*H + calOffY;
       px = cx + (px-cx)*sensitivity;
@@ -159,7 +156,7 @@
       if(trail.length>trailMax) trail.shift();
     }
 
-    // ===== 画 10m 气步枪靶 =====
+    // ===== 画靶 =====
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
 
@@ -173,19 +170,15 @@
         ctx.stroke();
       }
 
-      // 中心黑区（10环黑心）
+      // 黑心
       const blackR = blackCoreRings * ringStep * DPR;
       ctx.fillStyle = '#000';
       ctx.beginPath();
       ctx.arc(cx, cy, blackR, 0, Math.PI*2);
       ctx.fill();
-
-      // （可选）你如果想要“靶心白点”/或更像印刷的微小中心点，可以在这儿加
-      // ctx.fillStyle='#fff';
-      // ctx.beginPath(); ctx.arc(cx,cy,2*DPR,0,Math.PI*2); ctx.fill();
     }
 
-    // ===== 画瞄准器（去掉内白圈）=====
+    // ===== 画瞄准器（不画内白圈）=====
     function roundRectFill(x,y,w,h,r){
       ctx.beginPath();
       if(ctx.roundRect){
@@ -203,14 +196,13 @@
     }
 
     function drawSight(x,y){
-      // 外圈粗黑
       ctx.strokeStyle = '#000';
       ctx.lineWidth = sight_outer_w*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
       ctx.stroke();
 
-      // 左右横线
+      // 横线
       const outerInner = (sight_outer_r - sight_outer_w/2)*DPR;
       const barW = sight_bar_w*DPR;
       const barLen = sight_bar_len*DPR;
@@ -227,20 +219,18 @@
       x1 = x2 - barLen;
       roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
 
-      // 内黑圈（厚）
+      // 内黑圈
       ctx.strokeStyle = '#000';
       ctx.lineWidth = sight_inner_black_w*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_inner_black_r*DPR, 0, Math.PI*2);
       ctx.stroke();
-
-      // ✅ 不画内白圈（你说不需要白边）
     }
 
     function drawTrail(){
       if(trail.length<2) return;
       ctx.lineWidth = 3*DPR;
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.strokeStyle = trailColor; // ✅ 蓝色轨迹
       ctx.beginPath();
       ctx.moveTo(trail[0].x, trail[0].y);
       for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
@@ -256,7 +246,7 @@
       return 11 - ringIndex;
     }
 
-    function tryShot(){
+    function fire(){
       const now = Date.now();
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
       if(aimX==null) return;
@@ -277,12 +267,20 @@
     // ===== MediaPipe Hands =====
     let hands=null, camera=null;
 
+    function getHandIndexByLabel(hdList, labelWanted){
+      for(let i=0;i<hdList.length;i++){
+        const label = hdList[i]?.label || hdList[i]?.classification?.[0]?.label;
+        if(label === labelWanted) return i;
+      }
+      return -1;
+    }
+
     async function start(){
       statusEl.textContent = '请求摄像头权限…';
 
       hands = new Hands({ locateFile: (f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
       hands.setOptions({
-        maxNumHands: 1,
+        maxNumHands: 2,            // ✅ 需要同时识别左右手
         modelComplexity: 1,
         minDetectionConfidence: 0.65,
         minTrackingConfidence: 0.65,
@@ -292,25 +290,28 @@
         const lmList = res.multiHandLandmarks || [];
         const hdList = res.multiHandedness || [];
 
-        // 找 Right 手
-        let idx = -1;
-        for(let i=0;i<hdList.length;i++){
-          const label = hdList[i]?.label || hdList[i]?.classification?.[0]?.label;
-          if(label === 'Right'){ idx = i; break; }
-        }
-        if(idx === -1 || !lmList[idx]){
-          statusEl.textContent = '未检测到右手（Right）';
+        const leftIdx  = getHandIndexByLabel(hdList, 'Left');
+        const rightIdx = getHandIndexByLabel(hdList, 'Right');
+
+        const haveLeft  = leftIdx  !== -1 && lmList[leftIdx];
+        const haveRight = rightIdx !== -1 && lmList[rightIdx];
+
+        if(!haveLeft){
+          statusEl.textContent = '未检测到左手（Left）用于移动准星';
           render();
           return;
         }
+        statusEl.textContent = haveRight
+          ? '左手控准星 ✅ 右手扣枪 ✅'
+          : '左手控准星 ✅（右手未检测到，无法扣枪）';
 
-        statusEl.textContent = '右手检测 ✅（食指移动瞄准；弯曲=扣枪）';
+        // =========================
+        // ✅ 左手掌控制准星：用 middle_mcp(9) 更稳定
+        // =========================
+        const leftLm = lmList[leftIdx];
+        const palm = leftLm[9]; // middle_mcp
+        const p = mapToScreen(palm.x, palm.y);
 
-        const lm = lmList[idx];
-        const mcp = lm[5], pip = lm[6], tip = lm[8];
-
-        // 准星
-        const p = mapToScreen(tip.x, tip.y);
         if(aimX==null){ aimX=p.px; aimY=p.py; }
         else{
           aimX = ema(aimX, p.px, followAlpha);
@@ -318,16 +319,27 @@
         }
         pushTrail(aimX, aimY);
 
-        // 扣枪：食指角度
-        const A = mapToScreen(mcp.x, mcp.y);
-        const B = mapToScreen(pip.x, pip.y);
-        const C = mapToScreen(tip.x, tip.y);
-        const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
+        // =========================
+        // ✅ 右手食指弯曲=发射
+        // 右手 index: MCP=5 PIP=6 TIP=8
+        // =========================
+        if(haveRight){
+          const rLm = lmList[rightIdx];
+          const mcp = rLm[5], pip = rLm[6], tip = rLm[8];
 
-        if(ang >= STRAIGHT_DEG) wasStraight = true;
-        if(wasStraight && ang <= BENT_DEG){
-          wasStraight = false;
-          tryShot();
+          const A = mapToScreen(mcp.x, mcp.y);
+          const B = mapToScreen(pip.x, pip.y);
+          const C = mapToScreen(tip.x, tip.y);
+          const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
+
+          // 状态机：先直再弯触发一次
+          if(ang >= STRAIGHT_DEG) rightWasStraight = true;
+          if(rightWasStraight && ang <= BENT_DEG){
+            rightWasStraight = false;
+            fire();
+          }
+        } else {
+          rightWasStraight = false;
         }
 
         render();
@@ -357,7 +369,7 @@
     btnFlip.addEventListener('click', async ()=>{
       facingMode = (facingMode==='user') ? 'environment' : 'user';
       try{ camera && camera.stop(); }catch{}
-      aimX=aimY=null; trail=[]; calOffX=calOffY=0; wasStraight=false;
+      aimX=aimY=null; trail=[]; calOffX=calOffY=0; rightWasStraight=false;
       await start();
     });
 
