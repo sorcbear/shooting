@@ -203,12 +203,12 @@
 
     // 动态阈值系数（在 open/closed 之间插值）
     // ON 越靠近 closed -> 更严格；越靠近 open -> 更容易触发
-    const ON_POS  = 0.25;
+    const ON_POS  = 0.18;
     const OFF_POS = 0.55;
 
     // 连续帧确认（不让它难触发：ON 用 1~2 帧，OFF 用 2~3 帧）
-    const PINCH_ON_FRAMES  = 1;
-    const PINCH_OFF_FRAMES = 2;
+    const PINCH_ON_FRAMES  = 2;
+    const PINCH_OFF_FRAMES = 3;
 
     let pinchOnCount = 0;
     let pinchOffCount = 0;
@@ -492,11 +492,17 @@
       const ratio  = pinchD / palmS;
 
       // 更新基线：未捏合时更新 open，捏合时更新 closed
+// 先算出 PINCH_ON / PINCH_OFF 之后再更新基线（所以这段要放在阈值计算后面）
       if(!isPinched){
-        openBaseline = ema(openBaseline, ratio, BASELINE_EMA);
+        if(ratio > PINCH_OFF){ // ✅ 只有“确实松开”才更新 open
+          openBaseline = ema(openBaseline, ratio, BASELINE_EMA);
+        }
       }else{
-        closedBaseline = ema(closedBaseline, ratio, BASELINE_EMA);
+        if(ratio < PINCH_ON){  // ✅ 只有“确实捏合”才更新 closed
+    closedBaseline = ema(closedBaseline, ratio, BASELINE_EMA);
+        }
       }
+
 
       // 保证 open > closed（避免极端抖动导致反转）
       if(openBaseline < closedBaseline + 1e-3){
@@ -527,7 +533,8 @@
           }
         }else{
           // 正常捏合检测
-          if(ratio < PINCH_ON){
+          const ON_MARGIN = 0.03; // 0.02~0.05 之间调
+          if(ratio < (PINCH_ON - ON_MARGIN)){
             pinchOnCount++;
             pinchOffCount = 0;
           }else if(ratio > PINCH_OFF){
