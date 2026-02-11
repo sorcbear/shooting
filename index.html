@@ -8,12 +8,12 @@
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
 
-    /* ✅ 先显示摄像头（底层），canvas 叠加在上面 */
+    /* 摄像头底层 */
     #video{
       position:fixed; inset:0;
       width:100vw; height:100vh;
       object-fit:cover;
-      transform:scaleX(-1); /* 前置镜像更符合直觉（后面会按 facingMode 切） */
+      transform:scaleX(-1);
       z-index:0;
       background:#000;
     }
@@ -52,7 +52,6 @@
       max-height:36vh;overflow:auto;white-space:pre-wrap
     }
 
-    /* ✅ 闪光“拍照”效果层 */
     #flash{
       position:fixed; inset:0; z-index:2;
       background:#fff;
@@ -71,9 +70,7 @@
     <button id="btnClear">清空轨迹</button>
     <button id="btnFlip">切换前/后摄像头</button>
 
-    <span class="muted" id="hint">
-      规则：必须同时识别到左右手才开始。校准时让“控准星手指”对准中心圆点保持不动。
-    </span>
+    <span class="muted" id="hint"></span>
   </div>
 
   <div id="log"></div>
@@ -93,6 +90,7 @@
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
     const flashEl = document.getElementById('flash');
+    const hintEl = document.getElementById('hint');
     const btnCal = document.getElementById('btnCal');
     const btnClear = document.getElementById('btnClear');
     const btnFlip = document.getElementById('btnFlip');
@@ -112,31 +110,39 @@
     resize();
 
     // Camera
-    let facingMode = 'user'; // 'user' front, 'environment' back
+    let facingMode = 'user';
 
-    // States
+    // Game states
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
     let mode = MODE.WAIT_BOTH;
 
-    // =========================
-    // 目标靶心：白色正方形 + 中心黑圆点
-    // =========================
-    const targetSquareHalf = 80; // ✅ 方框大小保持
-    const targetSquareLine = 4;
-    const targetDotR = 30;       // ✅ 你的大圆心
+    // ✅ 新增：开局引导阶段（摄像头必须显示）
+    const BOOT = {
+      NEED_BOTH: 'NEED_BOTH',    // 等双手
+      NEED_LOCK: 'NEED_LOCK',    // 等准星套住靶心并稳定
+      PLAY: 'PLAY'               // 进入纯靶子模式（隐藏摄像头）
+    };
+    let bootState = BOOT.NEED_BOTH;
 
     // =========================
-    // Sight (GIF-like) - NO inner white ring
+    // Target: square + center dot
+    // =========================
+    const targetSquareHalf = 80;
+    const targetSquareLine = 4;
+    const targetDotR = 25;
+
+    // =========================
+    // Sight
     // =========================
     const sight_outer_r = 120;
     const sight_outer_w = 28;
     const sight_bar_w   = 8;
-    const sight_bar_len = 20;   // 你现在的短横条
-    const sight_bar_gap = -2;   // 让横条“插进外圈”避免白缝
+    const sight_bar_len = 20;
+    const sight_bar_gap = -2;
     const sight_inner_black_r = 44;
     const sight_inner_black_w = 14;
 
-    // Trail (blue)
+    // Trail
     let trail = [];
     const trailMax = 260;
     const trailMinMove = 2.5;
@@ -165,50 +171,54 @@
     let calBuf = [];
     let calOkFrames = 0;
 
-    // ✅ 第一枪后隐藏摄像头
-    let hasFiredOnce = false;
-
-    // ✅ “定格/拍照”效果：冻结准星一段时间，轨迹清空，再开始下一枪轨迹
+    // Freeze / flash
     const FREEZE_MS = 220;
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
     // =========================
-    // 成绩记录：10.9 满环（每一环宽度等分方框半径）
-    // 用圆形距离来给一个“类似10m靶”的连续环数
+    // ✅ 开局“套准靶心”门槛（避免太快隐藏摄像头）
+    // 需要满足：距离 <= LOCK_DIST 且连续 LOCK_FRAMES
+    // =========================
+    const LOCK_DIST_PX = 55;      // 你觉得太严就调大，比如 70；太松就调小，比如 45
+    const LOCK_FRAMES_NEED = 18;  // 需要连续多少帧稳定（越大越不容易误触发）
+    let lockFrames = 0;
+
+    // =========================
+    // ✅ 有效范围框（引导玩家把两只手放在边缘）
+    // 这只是引导，不影响算法
+    // =========================
+    const guideMargin = 40; // 边缘留白
+    function guideRect(){
+      const x = guideMargin * DPR;
+      const y = (guideMargin + 90) * DPR; // 给 HUD 留空间
+      const w = W - 2*x;
+      const h = H - y - (guideMargin*DPR + 140*DPR); // 给 log 留空间
+      return {x,y,w:Math.max(0,w),h:Math.max(0,h)};
+    }
+
+    // =========================
+    // Scoring: 10.9 max
     // =========================
     function scoreFromDist(dpx){
-      const maxR = targetSquareHalf * DPR;   // 以方框半径作为最大半径
+      const maxR = targetSquareHalf * DPR;
       if(dpx >= maxR) return 0.0;
-
-      // 10 个等宽 ring：每个 ring 0.9 分刻度
       const ringW = maxR / 10;
-      const ringIndex = Math.min(9, Math.floor(dpx / ringW)); // 0..9
-      const base = 10 - ringIndex; // 10..1
-      const frac = (dpx - ringIndex * ringW) / ringW; // 0..1
-
-      // ring 内：越靠近内侧分越高：base+0.9 -> base+0.0
+      const ringIndex = Math.min(9, Math.floor(dpx / ringW));
+      const base = 10 - ringIndex;
+      const frac = (dpx - ringIndex * ringW) / ringW;
       let s = base + (1 - frac) * 0.9;
-
-      // 中心点：最高 10.9
-      if(ringIndex === 0 && dpx <= 1e-6) s = 10.9;
-
-      // clamp
       s = Math.max(0, Math.min(10.9, s));
-      // 1 decimal
       return Math.round(s * 10) / 10;
     }
 
-    // 记录结构：只显示 “序号, 分数”
-    let shotScores = []; // number[]
-
+    // score list
+    let shotScores = [];
     function renderScores(){
       let out = '';
       for(let i=0;i<shotScores.length;i++){
-        const idx = i + 1;
+        const idx = i+1;
         out += `${idx},  ${shotScores[i].toFixed(1)}\n`;
-
-        // 每 10 发输出一次总环
         if(idx % 10 === 0){
           const start = idx - 10;
           const sum = shotScores.slice(start, idx).reduce((a,b)=>a+b,0);
@@ -234,10 +244,7 @@
 
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
-
-      // 前置镜像：坐标也镜像
       if(facingMode==='user') x = 1 - x;
-
       let px = x * W + calOffX;
       let py = y * H + calOffY;
 
@@ -268,29 +275,24 @@
       return Math.sqrt(ms);
     }
 
-    // Draw: target
+    // Draw target
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
-
       const half = targetSquareHalf * DPR;
 
-      // white square (fill)
       ctx.fillStyle = '#fff';
       ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
 
-      // black stroke
       ctx.strokeStyle = '#000';
       ctx.lineWidth = targetSquareLine * DPR;
       ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
 
-      // center dot
       ctx.fillStyle = '#000';
       ctx.beginPath();
       ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2);
       ctx.fill();
     }
 
-    // Draw: sight parts
     function roundRectFill(x,y,w,h,r){
       ctx.beginPath();
       if(ctx.roundRect){
@@ -308,14 +310,12 @@
     }
 
     function drawSight(x,y){
-      // outer ring
       ctx.strokeStyle = '#000';
       ctx.lineWidth = sight_outer_w*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
       ctx.stroke();
 
-      // bars (connect seamlessly)
       const outerInner = (sight_outer_r - sight_outer_w/2)*DPR;
       const barW = sight_bar_w*DPR;
       const barLen = sight_bar_len*DPR;
@@ -332,7 +332,6 @@
       x1 = x2 - barLen;
       roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
 
-      // inner black ring
       ctx.strokeStyle = '#000';
       ctx.lineWidth = sight_inner_black_w*DPR;
       ctx.beginPath();
@@ -350,37 +349,77 @@
       ctx.stroke();
     }
 
-    function render(){
+    // ✅ 引导：有效范围框 + 文案
+    function drawGuideOverlay(haveLeft, haveRight, locked){
+      const r = guideRect();
+
+      // 外层半透明遮罩
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fillRect(0,0,W,H);
+
+      // 中间“有效范围”挖空：用 clearRect 达到透视效果
+      ctx.clearRect(r.x, r.y, r.w, r.h);
+
+      // 框线
+      ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+      ctx.lineWidth = 3*DPR;
+      ctx.setLineDash([10*DPR, 10*DPR]);
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.setLineDash([]);
+
+      // 角标提示（左右）
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('左侧：右手食指控准星', r.x + 10*DPR, r.y + 10*DPR);
+      ctx.textAlign = 'right';
+      ctx.fillText('右侧：左手食指扳机', r.x + r.w - 10*DPR, r.y + 10*DPR);
+
+      // 中央状态
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.font = `${18*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+
+      if(!haveLeft || !haveRight){
+        ctx.fillText('请把两只手放入框内（尽量分开：一左一右）', cx, cy);
+      }else if(!locked){
+        ctx.fillText('双手已识别 ✅ 现在把准星“套住靶心”并稳定…', cx, cy);
+      }else{
+        ctx.fillText('锁定中… ✅', cx, cy);
+      }
+    }
+
+    function render(haveLeft=false, haveRight=false){
       drawTarget();
 
-      // freeze 时：轨迹已经清空，只画准星（定格） + 不更新
       drawTrail();
 
       const now = Date.now();
-      if(now < freezeUntil && freezeAimX != null){
-        drawSight(freezeAimX, freezeAimY);
-      }else{
-        if(aimX!=null) drawSight(aimX, aimY);
+      const fx = (now < freezeUntil && freezeAimX!=null) ? freezeAimX : aimX;
+      const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
+      if(fx!=null) drawSight(fx, fy);
+
+      // ✅ 开局引导层：只有 bootState 不是 PLAY 才显示
+      if(bootState !== BOOT.PLAY){
+        const locked = lockFrames > 0;
+        drawGuideOverlay(haveLeft, haveRight, locked);
       }
 
-      if(mode !== MODE.READY){
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      // 校准提示仍保留（但它会在 guide overlay 上面显示状态）
+      if(mode === MODE.CAL){
+        // 额外显示稳定帧
+        ctx.fillStyle = 'rgba(255,255,255,0.60)';
         ctx.fillRect(0,0,W,H);
         ctx.fillStyle = '#111';
         ctx.font = `${18*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
         ctx.textAlign='center'; ctx.textBaseline='middle';
-
-        if(mode === MODE.WAIT_BOTH){
-          ctx.fillText('请同时出示左右手（右手食指控准星，左手食指扳机）', cx, cy);
-        }else if(mode === MODE.CAL){
-          ctx.fillText('校准中：保持双手出现，让“控准星手指”对准中心圆点并保持不动…', cx, cy - 16*DPR);
-          ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
-          ctx.fillText(`稳定帧：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy + 18*DPR);
-        }
+        ctx.fillText('校准中：保持双手出现，让控准星手指对准靶心并保持不动…', cx, cy - 16*DPR);
+        ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+        ctx.fillText(`稳定帧：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy + 18*DPR);
       }
     }
 
-    // ✅ 声音：轻微“咔/滴”声（无需音频文件）
     function beep(){
       try{
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -396,7 +435,6 @@
       }catch{}
     }
 
-    // ✅ 闪光：拍照定格
     function flash(){
       flashEl.style.opacity = '1';
       setTimeout(()=>{ flashEl.style.opacity = '0'; }, 80);
@@ -407,13 +445,6 @@
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
       if(aimX==null) return;
 
-      // 第一枪后隐藏摄像头画面
-      if(!hasFiredOnce){
-        hasFiredOnce = true;
-        video.style.display = 'none';
-      }
-
-      // 记录分数（10.9满环）
       const d = Math.hypot(aimX-cx, aimY-cy);
       const score = scoreFromDist(d);
       shotScores.push(score);
@@ -421,19 +452,16 @@
 
       lastShotTs = now;
 
-      // ✅ 定格：冻结准星 + 清轨迹 + 视觉/声音反馈
+      // freeze + clear trail
       freezeAimX = aimX;
       freezeAimY = aimY;
       freezeUntil = now + FREEZE_MS;
-
-      // 扣扳机瞬间：蓝线消失（清空）
       trail = [];
 
       flash();
       beep();
     }
 
-    // MediaPipe: find Left/Right hands
     function getHandIndexByLabel(hdList, labelWanted){
       for(let i=0;i<hdList.length;i++){
         const label = hdList[i]?.label || hdList[i]?.classification?.[0]?.label;
@@ -446,12 +474,10 @@
     function processFrame(leftLm, rightLm){
       const now = Date.now();
 
-      // ✅ freeze 定格期间：不更新准星/轨迹/扳机状态
-      if(now < freezeUntil){
-        return;
-      }
+      // freeze期间不更新
+      if(now < freezeUntil) return;
 
-      // RIGHT index controls aim (tip=8)
+      // RIGHT tip controls aim
       const rightTip = rightLm[8];
       const rightTipP = mapToScreen(rightTip.x, rightTip.y);
 
@@ -461,18 +487,19 @@
         aimY = ema(aimY, rightTipP.py, followAlpha);
       }
 
-      if(mode === MODE.READY){
+      // ✅ 只有进入 PLAY 后才记录轨迹（否则引导阶段不画轨迹，避免乱）
+      if(mode === MODE.READY && bootState === BOOT.PLAY){
         pushTrail(aimX, aimY);
       }
 
-      // LEFT index controls trigger (angle MCP=5, PIP=6, TIP=8)
+      // LEFT trigger
       const mcp = leftLm[5], pip = leftLm[6], tip = leftLm[8];
       const A = mapToScreen(mcp.x, mcp.y);
       const B = mapToScreen(pip.x, pip.y);
       const C = mapToScreen(tip.x, tip.y);
       const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
 
-      if(mode === MODE.READY){
+      if(mode === MODE.READY && bootState === BOOT.PLAY){
         if(ang >= STRAIGHT_DEG) leftWasStraight = true;
 
         if(leftWasStraight && ang <= BENT_DEG){
@@ -490,7 +517,7 @@
         bentFrameCount = 0;
       }
 
-      // Calibration: use RIGHT tip stability (control finger)
+      // Calibration: use RIGHT tip stability
       if(mode === MODE.CAL){
         calBuf.push({x: rightTipP.px, y: rightTipP.py});
         if(calBuf.length > CAL_FRAMES_NEED) calBuf.shift();
@@ -512,6 +539,51 @@
           statusEl.textContent = 'READY ✅（校准完成）';
           btnCal.disabled = false;
         }
+      }
+    }
+
+    // ✅ 引导逻辑：双手 + 套住靶心稳定 -> 隐藏摄像头
+    function updateBootState(haveLeft, haveRight){
+      if(bootState === BOOT.PLAY) return;
+
+      if(!haveLeft || !haveRight){
+        bootState = BOOT.NEED_BOTH;
+        lockFrames = 0;
+        statusEl.textContent = '等待双手…';
+        hintEl.textContent = '请把两只手放入屏幕“虚线框”内：尽量左右分开。';
+        return;
+      }
+
+      // 有双手
+      if(bootState === BOOT.NEED_BOTH) bootState = BOOT.NEED_LOCK;
+
+      // 判断准星是否套住靶心
+      const d = (aimX==null) ? 999999 : Math.hypot(aimX - cx, aimY - cy);
+      const lockedNow = d <= (LOCK_DIST_PX * DPR);
+
+      if(lockedNow) lockFrames++;
+      else lockFrames = 0;
+
+      statusEl.textContent = lockedNow
+        ? `锁定中… ${lockFrames}/${LOCK_FRAMES_NEED}`
+        : '双手已识别 ✅ 请套住靶心';
+
+      hintEl.textContent = lockedNow
+        ? '保持不动一小会儿：锁定完成后将隐藏摄像头，进入纯靶子模式。'
+        : '把准星移到靶心上（套住圆心），并保持稳定。';
+
+      if(lockFrames >= LOCK_FRAMES_NEED){
+        bootState = BOOT.PLAY;
+
+        // ✅ 隐藏摄像头
+        video.style.display = 'none';
+
+        // 进入可射击状态
+        statusEl.textContent = 'READY ✅（可射击）';
+        hintEl.textContent = '左手食指扣动=开枪；每枪会定格并清空轨迹，然后开始下一枪轨迹。';
+
+        // 清一次轨迹
+        trail = [];
       }
     }
 
@@ -539,34 +611,37 @@
         const haveLeft  = leftIdx  !== -1 && lmList[leftIdx];
         const haveRight = rightIdx !== -1 && lmList[rightIdx];
 
+        // mode: ready when both present, but boot gate still controls hiding
         if(!haveLeft || !haveRight){
           mode = MODE.WAIT_BOTH;
-          statusEl.textContent = !haveLeft && !haveRight
-            ? '等待双手…'
-            : (!haveLeft ? '缺少左手（Left）' : '缺少右手（Right）');
-
           leftWasStraight = false;
           bentFrameCount = 0;
 
-          if(mode === MODE.CAL){
-            calOkFrames = 0;
-            calBuf = [];
-          }
-
-          render();
+          // 引导状态也跟着更新
+          updateBootState(haveLeft, haveRight);
+          render(haveLeft, haveRight);
           return;
         }
 
         if(mode === MODE.WAIT_BOTH){
           mode = MODE.READY;
-          statusEl.textContent = 'READY ✅（双手已识别）';
         }
 
+        // 更新 aim / trigger / cal
         processFrame(lmList[leftIdx], lmList[rightIdx]);
-        render();
+
+        // 引导状态：需要用当前 aim 判断锁定
+        updateBootState(haveLeft, haveRight);
+
+        render(haveLeft, haveRight);
       });
 
-      // video 镜像：前置 user 镜像；后置不镜像
+      // show video on start
+      video.style.display = 'block';
+      bootState = BOOT.NEED_BOTH;
+      lockFrames = 0;
+
+      // mirror
       video.style.transform = (facingMode==='user') ? 'scaleX(-1)' : 'none';
 
       camera = new Camera(video, {
@@ -577,19 +652,16 @@
 
       await camera.start();
 
-      // 初始显示摄像头
-      video.style.display = 'block';
-      hasFiredOnce = false;
-
       statusEl.textContent = '等待双手…';
+      hintEl.textContent = '请把两只手放入屏幕“虚线框”内：尽量左右分开。';
       mode = MODE.WAIT_BOTH;
-      render();
+      render(false,false);
     }
 
     // UI
     btnClear.addEventListener('click', ()=>{
       trail = [];
-      render();
+      render(true,true);
     });
 
     btnCal.addEventListener('click', ()=>{
@@ -599,7 +671,8 @@
       trail = [];
       btnCal.disabled = true;
       statusEl.textContent = '校准中…';
-      render();
+      hintEl.textContent = '保持双手出现：让控准星手指对准靶心并稳定。';
+      render(true,true);
     });
 
     btnFlip.addEventListener('click', async ()=>{
@@ -618,23 +691,24 @@
       freezeUntil = 0;
       freezeAimX = freezeAimY = null;
 
-      // reset UI
+      // reset boot guide
+      bootState = BOOT.NEED_BOTH;
+      lockFrames = 0;
+      video.style.display = 'block';
+
+      // reset cal
       calOkFrames=0;
       calBuf=[];
       btnCal.disabled=false;
 
-      // camera should show again until first shot
-      hasFiredOnce = false;
-      video.style.display = 'block';
-
       await start();
     });
 
-    // Start
     start().catch(err=>{
       console.error(err);
       statusEl.textContent = '启动失败：请在 https 打开并允许摄像头权限';
-      render();
+      hintEl.textContent = '';
+      render(false,false);
     });
   </script>
 </body>
