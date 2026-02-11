@@ -196,7 +196,7 @@
     // =========================
     function scoreFromDist(dpx){
   // 1) 10.0 边界：用你“中心小圆点”的半径当 10环边界
-      const tenRingR = targetDotR * DPR *0.6;          // <= 这个圈内才会出现 10.x
+      const tenRingR = targetDotR * DPR *0.3;          // <= 这个圈内才会出现 10.x
       const maxR     = targetSquareHalf * DPR;    // 最外（边界）视为 0 分
 
       if(dpx >= maxR) return 0.0;
