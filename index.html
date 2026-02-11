@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="format-detection" content="telephone=no,address=no,email=no">
-  <title>Air Finger Rifle - ISSF Edition</title>
+  <title>Air Finger Rifle - Pro Scoring</title>
 
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
@@ -72,11 +72,11 @@
 
     <div id="rightPane">
       <div id="hud">
-        <div><b>Finger Rifle</b> <span class="muted">右手食指瞄准 · 左手【捏合】开火</span></div>
+        <div><b>Finger Rifle</b> <span class="muted">右手瞄准 · 左手【捏合】击发</span></div>
         <span id="status" class="pill">初始化…</span>
-        <button id="btnCal">校准准心（需双手）</button>
-        <button id="btnClear">清空轨迹</button>
-        <button id="btnFlip">切换前/后摄像头</button>
+        <button id="btnCal">校准准心</button>
+        <button id="btnClear">清空</button>
+        <button id="btnFlip">翻转镜头</button>
         <span class="muted" id="hint"></span>
       </div>
       <div id="log"></div>
@@ -126,27 +126,27 @@
     let firstShotDone = false;
     let lockReady = false;
 
-    // Target Visuals
+    // Visual Config
     const targetSquareHalf = 110;
-    const targetDotR = 22;
+    const targetDotR = 22; // 中央黑点
 
-    // Sight Visuals
+    // Sight & Scoring Config (关键修改)
     const sight_outer_r = 120;
-    const sight_inner_black_r = 44; // 视觉上的"黑环"半径
-    // 假设：黑环边缘(44px)对应 7.0环。
-    // 根据公式 7.0 = 10.9 - (r/2.5) => 3.9 = r/2.5 => r = 9.75mm
-    // 所以：屏幕上的 44px 等于现实的 9.75mm
-    const REFERENCE_MM_AT_BLACK_EDGE = 9.75; 
-
+    const sight_inner_black_r = 44; 
+    
+    // ✅ 锚点定义：屏幕上半径 44px 的黑环 = 现实中 9.0环的边界 (4.75mm)
+    // 这样只要准心在黑环内，分数绝对 >= 9.0
+    const MM_AT_BLACK_EDGE = 4.75; 
+    
     // Trail
     let trail = [];
     const trailMax = 320;
     const trailMinMove = 0.35;
     
-    // Aim (右手)
+    // Aim
     let aimX=null, aimY=null;
     const followAlpha = 0.92;
-    let sensitivity = 2.35; // 灵敏度
+    let sensitivity = 2.35;
 
     // Calibration
     let calOffX = 0, calOffY = 0;
@@ -155,7 +155,7 @@
     let calBuf = [];
     let calOkFrames = 0;
 
-    // Trigger (左手 - 捏合)
+    // Trigger (Pinch)
     let isPinched = false;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
@@ -171,25 +171,23 @@
     let lockFrames = 0;
 
     // ============================================
-    // ✅ 核心修改：新的计分算法 (ISSF 电子靶标准)
+    // ✅ 修正后的计分算法
     // Formula: Score = 10.9 - (r_mm / 2.5)
+    // Anchor: 44px = 4.75mm (9.0 Ring)
     // ============================================
     function scoreFromDist(dpx){
-      // 1. 计算当前屏幕的 px/mm 比例
-      //    因为我们定义 sight_inner_black_r (44px) 对应 9.75mm (即7环边界)
+      // 1. 计算比例尺 (px per mm)
       const blackRadiusPx = sight_inner_black_r * DPR;
-      const pixelsPerMm = blackRadiusPx / REFERENCE_MM_AT_BLACK_EDGE;
+      const pixelsPerMm = blackRadiusPx / MM_AT_BLACK_EDGE;
 
-      // 2. 将当前距离换算为 mm
+      // 2. 换算物理距离
       const r_mm = dpx / pixelsPerMm;
 
-      // 3. 代入公式
+      // 3. ISSF 公式
       let score = 10.9 - (r_mm / 2.5);
 
-      // 4. 边界处理 (最小0，最大10.9)
+      // 4. 限制与修约
       score = Math.max(0, Math.min(10.9, score));
-
-      // 5. 保留一位小数 (Round to nearest 0.1)
       return Math.round(score * 10) / 10;
     }
 
@@ -198,7 +196,9 @@
       let out = '';
       for(let i=0;i<shotScores.length;i++){
         const idx = i+1;
-        out += `${idx}.  ${shotScores[i].toFixed(1)}\n`;
+        // 标记 10环以上的精彩射击
+        const mark = shotScores[i] >= 10.0 ? ' ★' : '';
+        out += `${idx}.  ${shotScores[i].toFixed(1)}${mark}\n`;
         if(idx % 10 === 0){
           const start = idx - 10;
           const sum = shotScores.slice(start, idx).reduce((a,b)=>a+b,0);
@@ -216,7 +216,6 @@
       if(facingMode==='user') x = 1 - x;
       let px = x * W + calOffX;
       let py = y * H + calOffY;
-      // 增加灵敏度偏移
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
       return {px,py};
@@ -237,34 +236,40 @@
       return Math.sqrt(points.reduce((s,p)=>s+(p.x-mx)**2+(p.y-my)**2,0)/points.length);
     }
 
-    // Draw Functions
+    // Draw
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
       const half = targetSquareHalf * DPR;
-      // 靶纸底色
       ctx.fillStyle = '#fff'; ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
       ctx.strokeStyle = '#000'; ctx.lineWidth = 4 * DPR;
       ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
-      // 黑心
       ctx.fillStyle = '#000'; ctx.beginPath();
       ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2); ctx.fill();
     }
 
     function drawSight(x,y){
-      // 瞄具外圈
+      // 外部瞄具
       ctx.strokeStyle = '#000'; ctx.lineWidth = 28*DPR;
       ctx.beginPath(); ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2); ctx.stroke();
       
-      // 瞄具横杠 (装饰)
       const rOuter = (sight_outer_r - 14)*DPR; 
       const barW = 8*DPR;
       ctx.fillStyle = '#000';
-      ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW); // 左耳
-      ctx.fillRect(x+rOuter, y-barW/2, 20*DPR, barW); // 右耳
+      ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW); 
+      ctx.fillRect(x+rOuter, y-barW/2, 20*DPR, barW);
 
-      // 内环 (决定计分比例的参考环)
+      // 9环边界 (黑色实心圆环)
+      const r9 = sight_inner_black_r * DPR;
       ctx.strokeStyle = '#000'; ctx.lineWidth = 14*DPR;
-      ctx.beginPath(); ctx.arc(x,y, sight_inner_black_r*DPR, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x,y, r9, 0, Math.PI*2); ctx.stroke();
+
+      // ✅ 新增：10.0环指示线 (细白虚线)
+      // 计算：10.0边界是 2.25mm。已知 4.75mm = r9
+      const r10 = r9 * (2.25 / 4.75);
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5*DPR;
+      ctx.setLineDash([3*DPR, 3*DPR]);
+      ctx.beginPath(); ctx.arc(x,y, r10, 0, Math.PI*2); ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     function drawTrail(){
@@ -289,12 +294,12 @@
       ctx.font = `${14*DPR}px system-ui,sans-serif`;
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left'; ctx.fillText('左侧：右手瞄准', r.x+10, r.y+10);
-      ctx.textAlign = 'right'; ctx.fillText('右侧：左手捏合开枪', r.x+r.w-10, r.y+10);
+      ctx.textAlign = 'right'; ctx.fillText('右侧：左手捏合', r.x+r.w-10, r.y+10);
 
       let msg = '';
-      if(!haveLeft || !haveRight) msg = '请双手入框（尽量左右分开）';
-      else if(!locked) msg = '双手已识别 ✅ 请将准星对准靶心...';
-      else if(!firstShotDone) msg = '已锁定 ✅ 请捏合左手开第一枪';
+      if(!haveLeft || !haveRight) msg = '请双手入框 (尽量分开)';
+      else if(!locked) msg = '请套住靶心...';
+      else if(!firstShotDone) msg = '已锁定 ✅ 捏合左手开第一枪';
       else msg = 'READY ✅';
 
       ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -322,7 +327,7 @@
         ctx.fillStyle = '#111'; ctx.textAlign='center';
         ctx.font = `${18*DPR}px sans-serif`;
         ctx.fillText('校准中：保持瞄准靶心不动...', cx, cy-16*DPR);
-        ctx.fillText(`稳定进度：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy+18*DPR);
+        ctx.fillText(`进度：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy+18*DPR);
       }
     }
 
@@ -342,7 +347,7 @@
       if(aimX==null) return;
 
       const dpx = Math.hypot(aimX-cx, aimY-cy);
-      const score = scoreFromDist(dpx); // 使用新算法
+      const score = scoreFromDist(dpx);
       shotScores.push(score);
       renderScores();
 
@@ -357,14 +362,14 @@
       if(!firstShotDone && lockReady){
         firstShotDone = true;
         bootState = BOOT.PLAY;
-        video.style.opacity = '0'; // 隐藏视频
+        video.style.opacity = '0';
         video.style.pointerEvents = 'none';
         statusEl.textContent = 'READY ✅';
-        hintEl.textContent = '左手食指拇指捏合=开枪';
+        hintEl.textContent = '黑环内=9分以上，虚线内=10分以上';
       }
     }
 
-    // MediaPipe Hand Logic
+    // MediaPipe Logic
     function getHandIndexByLabel(hdList, label){
       for(let i=0;i<hdList.length;i++){
         if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
@@ -376,10 +381,9 @@
       const now = Date.now();
       if(now < freezeUntil) return;
 
-      // 1. 右手 (Right Hand) 控制准星 -> Index Tip (8)
+      // 1. Right Hand (Aim)
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
-      
       if(aimX==null){ aimX=aimP.px; aimY=aimP.py; }
       else{
         aimX = ema(aimX, aimP.px, followAlpha);
@@ -387,19 +391,12 @@
       }
       if(mode === MODE.READY && bootState === BOOT.PLAY) pushTrail(aimX, aimY);
 
-      // 2. 左手 (Left Hand) 控制扳机 -> Pinch (Thumb 4, Index 8)
-      // ============================================
-      // ✅ 核心修改：捏合检测 (Pinch Detection)
-      // ============================================
-      const lThumb = leftLm[4];
-      const lIndex = leftLm[8];
+      // 2. Left Hand (Pinch Trigger)
+      const lThumb = leftLm[4], lIndex = leftLm[8];
       const pT = mapToScreen(lThumb.x, lThumb.y);
       const pI = mapToScreen(lIndex.x, lIndex.y);
-      
-      // 计算屏幕像素距离
       const pinchDist = Math.hypot(pT.px - pI.px, pT.py - pI.py);
       
-      // 阈值：捏合 < 35px*DPR, 松开 > 55px*DPR (设置迟滞区间防止误触)
       const PINCH_THRESH = 35 * DPR;
       const RELEASE_THRESH = 55 * DPR;
 
@@ -407,19 +404,13 @@
 
       if(allowFire){
         if(pinchDist < PINCH_THRESH){
-          if(!isPinched){
-            // 状态从未捏合变为捏合 -> 触发
-            isPinched = true;
-            fire();
-          }
+          if(!isPinched){ isPinched = true; fire(); }
         } else if(pinchDist > RELEASE_THRESH){
           isPinched = false;
         }
-      } else {
-        isPinched = false;
-      }
+      } else { isPinched = false; }
 
-      // 3. 校准逻辑 (Calibration)
+      // 3. Calibration
       if(mode === MODE.CAL){
         calBuf.push({x:aimP.px, y:aimP.py});
         if(calBuf.length>CAL_FRAMES_NEED) calBuf.shift();
@@ -443,7 +434,7 @@
         bootState = BOOT.NEED_BOTH;
         lockFrames = 0; lockReady = false;
         statusEl.textContent = '等待双手...';
-        hintEl.textContent = '左手捏合开火，右手食指瞄准。';
+        hintEl.textContent = '左手捏合开火，右手瞄准。';
         return;
       }
       if(bootState === BOOT.NEED_BOTH) bootState = BOOT.NEED_LOCK;
@@ -454,8 +445,8 @@
 
       if(lockFrames >= LOCK_FRAMES_NEED){
         lockReady = true;
-        statusEl.textContent = '已锁定 ✅ 请捏合左手开第一枪';
-        hintEl.textContent = '第一枪后将隐藏摄像头画面。';
+        statusEl.textContent = '已锁定 ✅ 请捏合左手';
+        hintEl.textContent = '第一枪后将进入盲射模式';
       } else {
         lockReady = false;
         statusEl.textContent = locked ? `锁定中... ${lockFrames}/${LOCK_FRAMES_NEED}` : '请对准靶心';
@@ -496,10 +487,7 @@
       await camera.start();
     }
 
-    btnCal.onclick = ()=>{
-      mode = MODE.CAL; calOkFrames=0; calBuf=[]; trail=[]; btnCal.disabled=true;
-      statusEl.textContent = '校准中...';
-    };
+    btnCal.onclick = ()=>{ mode = MODE.CAL; calOkFrames=0; calBuf=[]; trail=[]; btnCal.disabled=true; };
     btnClear.onclick = ()=>{ trail=[]; render(true,true); };
     btnFlip.onclick = async ()=>{
       facingMode = (facingMode==='user')?'environment':'user';
@@ -510,10 +498,7 @@
       await start();
     };
 
-    start().catch(e=>{
-      console.error(e);
-      statusEl.textContent='启动失败: 请检查摄像头权限或HTTPS连接';
-    });
+    start();
   </script>
 </body>
 </html>
