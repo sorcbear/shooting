@@ -2,47 +2,49 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="format-detection" content="telephone=no,address=no,email=no">
-  <title>Air Rifle (Finger Aim)</title>
+  <title>Finger Rifle</title>
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#fff; overflow:hidden; }
-    canvas { position:fixed; inset:0; width:100vw; height:100vh; touch-action:none; }
+    html,body{margin:0;height:100%;background:#fff;overflow:hidden}
+    canvas{position:fixed;inset:0;width:100vw;height:100vh;touch-action:none}
+    video{display:none}
     #hud{
-      position:fixed; left:12px; top:12px;
-      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      color:#111; background:rgba(255,255,255,0.85);
-      padding:10px 12px; border:1px solid #ddd; border-radius:10px;
-      max-width: calc(100vw - 24px);
+      position:fixed;left:12px;top:12px;right:12px;
+      font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:#111;background:rgba(255,255,255,.86);
+      border:1px solid #ddd;border-radius:12px;padding:10px 12px;
+      display:flex;gap:10px;flex-wrap:wrap;align-items:center
     }
-    #btnRow{ margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; }
-    button{
-      appearance:none; border:1px solid #111; background:#fff; color:#111;
-      padding:8px 10px; border-radius:10px; font-weight:600;
+    #hud b{font-size:15px}
+    #hud .muted{color:#666}
+    #hud .pill{border:1px solid #111;border-radius:999px;padding:6px 10px;background:#fff;font-weight:700}
+    #hud button{
+      appearance:none;border:1px solid #111;background:#fff;color:#111;
+      padding:8px 10px;border-radius:10px;font-weight:700
     }
-    .muted{ color:#666; font-weight:500; }
-    video{ display:none; }
+    #log{position:fixed;left:12px;bottom:12px;right:12px;
+      font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
+      color:#111;background:rgba(255,255,255,.86);
+      border:1px solid #ddd;border-radius:12px;padding:10px 12px;
+      max-height:36vh;overflow:auto
+    }
   </style>
 </head>
 <body>
   <div id="hud">
-    <div><b>Finger Aim</b> <span class="muted">（前置摄像头）</span></div>
-    <div id="status" class="muted">加载模型中…</div>
-    <div id="info" class="muted">提示：把食指伸直对着屏幕，距离约 10–30cm。</div>
-    <div id="btnRow">
-      <button id="btnCal">校准中心</button>
-      <button id="btnClear">清空轨迹</button>
-      <button id="btnFlip">切换前/后摄像头</button>
-    </div>
-    <div class="muted" style="margin-top:6px;">
-      轨迹=进枪路线；准星=食指指尖位置（已平滑）。
-    </div>
+    <div><b>Finger Rifle</b> <span class="muted">右手食指瞄准 · 弯曲=扣枪</span></div>
+    <span id="status" class="pill">加载中…</span>
+    <button id="btnCal">校准：当前准星=靶心</button>
+    <button id="btnClear">清空轨迹</button>
+    <button id="btnFlip">切换前/后摄像头</button>
+    <span class="muted">提示：距离 10–30cm、手放画面中央更稳。</span>
   </div>
+  <div id="log"></div>
 
   <video id="video" playsinline></video>
   <canvas id="cv"></canvas>
 
-  <!-- MediaPipe Hands (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
 
@@ -51,205 +53,338 @@
     const canvas = document.getElementById('cv');
     const ctx = canvas.getContext('2d');
     const statusEl = document.getElementById('status');
-
+    const logEl = document.getElementById('log');
     const btnCal = document.getElementById('btnCal');
     const btnClear = document.getElementById('btnClear');
     const btnFlip = document.getElementById('btnFlip');
 
-    // ====== 画面参数 ======
-    const dotRadius = 14;         // 靶心黑点半径（像素）
-    const crossRadius = 10;       // 准星大小
-    const trailMax = 180;         // 轨迹点数量（越大轨迹越长）
-    const trailStepMin = 2.0;     // 新点最小移动阈值（像素），避免密集抖点
-
-    // ====== 跟随手指的“手感”参数（关键） ======
-    // EMA 平滑：越接近 1 越跟得紧，越小越稳但延迟更大
-    const followAlpha = 0.22;     // 0.15~0.35 之间调
-    // 额外的“灵敏度”（把手指移动映射得更大/更小）
-    let sensitivity = 1.10;       // 0.8~1.5 之间调
-
-    // ====== 摄像头方向 ======
-    let facingMode = 'user'; // 'user' 前置, 'environment' 后置
-
-    // ====== 运行状态 ======
-    let W = 0, H = 0, DPR = 1;
-    let cx = 0, cy = 0;           // 屏幕中心（靶心位置）
-    let aimX = null, aimY = null; // 准星（平滑后）
-    let calOffX = 0, calOffY = 0; // 校准偏移：把“当前手指位置”对齐到靶心
-    let trail = [];
-
-    function resize() {
-      DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-      W = Math.floor(window.innerWidth * DPR);
-      H = Math.floor(window.innerHeight * DPR);
-      canvas.width = W;
-      canvas.height = H;
-      canvas.style.width = window.innerWidth + 'px';
-      canvas.style.height = window.innerHeight + 'px';
-      cx = W / 2;
-      cy = H / 2;
+    // ===== 画布尺寸 =====
+    let W=0,H=0,DPR=1,cx=0,cy=0;
+    function resize(){
+      DPR = Math.max(1, Math.floor(window.devicePixelRatio||1));
+      W = Math.floor(innerWidth*DPR);
+      H = Math.floor(innerHeight*DPR);
+      canvas.width=W; canvas.height=H;
+      canvas.style.width=innerWidth+'px';
+      canvas.style.height=innerHeight+'px';
+      cx=W/2; cy=H/2;
     }
-    window.addEventListener('resize', resize);
+    addEventListener('resize', resize);
     resize();
 
-    function drawScene() {
-      // 白底
-      ctx.clearRect(0, 0, W, H);
+    // ===== 摄像头 =====
+    let facingMode = 'user'; // 'user'前置 'environment'后置
 
-      // 轨迹
-      if (trail.length >= 2) {
-        ctx.lineWidth = 3 * DPR;
-        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-        ctx.beginPath();
-        ctx.moveTo(trail[0].x, trail[0].y);
-        for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
-        ctx.stroke();
-      }
+    // ===== 靶子参数（固定在中心）=====
+    const targetSquare = 86;      // 中心方框半边长（px）
+    const ringCount = 10;         // 10环
+    const ringStep = 18;          // 每环间距（px）
+    const ringLine = 3;           // 环线粗细
 
-      // 靶心黑点
-      ctx.fillStyle = '#000';
-      ctx.beginPath();
-      ctx.arc(cx, cy, dotRadius * DPR, 0, Math.PI * 2);
-      ctx.fill();
+    // ===== 瞄准器样式（跟随手）——按你的 GIF 风格 =====
+    const sight_outer_r = 120; // 外圈半径
+    const sight_outer_w = 28;  // 外圈粗细
+    const sight_bar_w   = 8;
+    const sight_bar_len = 40;
+    const sight_bar_gap = 5;
+    const sight_inner_black_r = 44;
+    const sight_inner_black_w = 14;
+    const sight_inner_white_r = 34;
+    const sight_inner_white_w = 6;
 
-      // 准星
-      if (aimX != null) {
-        ctx.lineWidth = 3 * DPR;
-        ctx.strokeStyle = '#000';
-        // 圆
-        ctx.beginPath();
-        ctx.arc(aimX, aimY, crossRadius * DPR, 0, Math.PI * 2);
-        ctx.stroke();
-        // 十字
-        ctx.beginPath();
-        ctx.moveTo(aimX - 16*DPR, aimY);
-        ctx.lineTo(aimX + 16*DPR, aimY);
-        ctx.moveTo(aimX, aimY - 16*DPR);
-        ctx.lineTo(aimX, aimY + 16*DPR);
-        ctx.stroke();
-      }
+    // ===== 进枪轨迹 =====
+    let trail = [];
+    const trailMax = 220;
+    const trailMinMove = 2.0; // px
+
+    // ===== 准星平滑 =====
+    let aimX=null, aimY=null;
+    const followAlpha = 0.22; // 越小越稳、越大越灵
+    let sensitivity = 1.05;
+
+    // ===== 校准偏移（把当前准星对齐靶心）=====
+    let calOffX = 0, calOffY = 0;
+
+    // ===== 扣枪（食指弯曲）检测 =====
+    // 用食指 PIP 关节角度：直时接近 180°，弯时变小
+    const STRAIGHT_DEG = 165; // 判定“直”
+    const BENT_DEG     = 110; // 判定“弯”——触发扣枪
+    const SHOT_COOLDOWN_MS = 450;
+    let lastShotTs = 0;
+    let wasStraight = false;
+
+    // ===== 记录成绩 =====
+    let shots = []; // {t,score,x,y,d}
+    function logShot(s){
+      shots.unshift(s);
+      if(shots.length>12) shots.pop();
+      logEl.innerHTML = shots.map((r,i)=>{
+        const ts = new Date(r.t).toLocaleTimeString();
+        return `${i+1}. ${ts}  score=${r.score}  d=${r.d.toFixed(1)}px`;
+      }).join('<br>');
     }
 
-    // 将 MediaPipe 归一化坐标 (0~1) 映射到屏幕像素
-    // 前置摄像头需要左右镜像更符合直觉
-    function mapToScreen(nx, ny) {
+    // ===== 工具：角度（A-B-C, 取B点角度）=====
+    function angleDeg(ax,ay,bx,by,cx,cy){
+      const abx=ax-bx, aby=ay-by;
+      const cbx=cx-bx, cby=cy-by;
+      const dot = abx*cbx + aby*cby;
+      const lab = Math.hypot(abx,aby);
+      const lcb = Math.hypot(cbx,cby);
+      if(lab===0||lcb===0) return 0;
+      const cos = Math.max(-1, Math.min(1, dot/(lab*lcb)));
+      return Math.acos(cos) * 180/Math.PI;
+    }
+
+    // ===== MediaPipe 归一化坐标 -> 屏幕 =====
+    function mapToScreen(nx, ny){
       let x = nx, y = ny;
-      if (facingMode === 'user') x = 1 - x; // 镜像
-      let px = x * W;
-      let py = y * H;
-      // 应用校准偏移（把“当前手指”对齐到靶心）
-      px += calOffX;
-      py += calOffY;
-      // 灵敏度：相对靶心放大/缩小
-      px = cx + (px - cx) * sensitivity;
-      py = cy + (py - cy) * sensitivity;
-      // 限制到画布内
+      if(facingMode==='user') x = 1-x; // 镜像更符合直觉
+      let px = x*W + calOffX;
+      let py = y*H + calOffY;
+      px = cx + (px-cx)*sensitivity;
+      py = cy + (py-cy)*sensitivity;
       px = Math.max(0, Math.min(W, px));
       py = Math.max(0, Math.min(H, py));
-      return {px, py};
+      return {px,py};
+    }
+    const ema = (prev,next,a)=> prev + (next-prev)*a;
+
+    function pushTrail(x,y){
+      if(trail.length===0){ trail.push({x,y}); return; }
+      const last = trail[trail.length-1];
+      if(Math.hypot(x-last.x,y-last.y) < trailMinMove*DPR) return;
+      trail.push({x,y});
+      if(trail.length>trailMax) trail.shift();
     }
 
-    function ema(prev, next, alpha) {
-      return prev + (next - prev) * alpha;
-    }
+    // ===== 画靶子 =====
+    function drawTarget(){
+      // 白底
+      ctx.clearRect(0,0,W,H);
 
-    function pushTrail(x, y) {
-      if (trail.length === 0) {
-        trail.push({x, y});
-        return;
+      // 环线（10->1，从内到外）
+      ctx.lineWidth = ringLine*DPR;
+      ctx.strokeStyle = '#000';
+      for(let i=1;i<=ringCount;i++){
+        const r = i*ringStep*DPR;
+        ctx.beginPath();
+        ctx.arc(cx,cy,r,0,Math.PI*2);
+        ctx.stroke();
       }
-      const last = trail[trail.length - 1];
-      const dx = x - last.x, dy = y - last.y;
-      if (Math.hypot(dx, dy) < trailStepMin * DPR) return;
-      trail.push({x, y});
-      if (trail.length > trailMax) trail.shift();
+
+      // 中心方框（你要的“圆心外面还有一个方框”）
+      const s = targetSquare*DPR;
+      ctx.lineWidth = 4*DPR;
+      ctx.strokeRect(cx-s, cy-s, 2*s, 2*s);
+
+      // 环数标注（简单放右上象限）
+      ctx.fillStyle = '#000';
+      ctx.font = `${12*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      ctx.textAlign='left'; ctx.textBaseline='middle';
+      for(let i=1;i<=ringCount;i++){
+        const r = i*ringStep*DPR;
+        const label = (11-i).toString(); // 内圈=10
+        ctx.fillText(label, cx + r - 10*DPR, cy - r + 10*DPR);
+      }
     }
 
-    // ====== MediaPipe Hands ======
-    let hands = null;
-    let camera = null;
+    // ===== 画瞄准器（不画圆心黑点）=====
+    function drawSight(x,y){
+      // 外圈粗黑
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = sight_outer_w*DPR;
+      ctx.beginPath();
+      ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
+      ctx.stroke();
 
-    async function start() {
+      // 左右两条横线（在外圈内侧）
+      const outerInner = (sight_outer_r - sight_outer_w/2)*DPR;
+      const barW = sight_bar_w*DPR;
+      const barLen = sight_bar_len*DPR;
+      const gap = sight_bar_gap*DPR;
+
+      ctx.fillStyle = '#000';
+      // left
+      let x1 = x - outerInner + gap;
+      let x2 = x1 + barLen;
+      let y1 = y - barW/2;
+      let y2 = y + barW/2;
+      roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
+
+      // right
+      x2 = x + outerInner - gap;
+      x1 = x2 - barLen;
+      roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
+
+      // 内黑圈
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = sight_inner_black_w*DPR;
+      ctx.beginPath();
+      ctx.arc(x,y, sight_inner_black_r*DPR, 0, Math.PI*2);
+      ctx.stroke();
+
+      // 内白圈
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = sight_inner_white_w*DPR;
+      ctx.beginPath();
+      ctx.arc(x,y, sight_inner_white_r*DPR, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    function roundRectFill(x,y,w,h,r){
+      // Canvas roundRect 兼容
+      ctx.beginPath();
+      if(ctx.roundRect){
+        ctx.roundRect(x,y,w,h,r);
+      }else{
+        // fallback
+        const rr = Math.min(r, w/2, h/2);
+        ctx.moveTo(x+rr,y);
+        ctx.arcTo(x+w,y, x+w,y+h, rr);
+        ctx.arcTo(x+w,y+h, x,y+h, rr);
+        ctx.arcTo(x,y+h, x,y, rr);
+        ctx.arcTo(x,y, x+w,y, rr);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ===== 画进枪轨迹 =====
+    function drawTrail(){
+      if(trail.length<2) return;
+      ctx.lineWidth = 3*DPR;
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.moveTo(trail[0].x, trail[0].y);
+      for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
+      ctx.stroke();
+    }
+
+    // ===== 计分（10..1）=====
+    function scoreFromDist(dpx){
+      // 内圈 r=ringStep -> 10环；超过 ringCount*ringStep -> 0（脱靶）
+      const r = dpx / (ringStep*DPR);
+      const ringIndex = Math.ceil(r); // 1..10
+      if(ringIndex<=0) return 10;
+      if(ringIndex>ringCount) return 0;
+      return 11 - ringIndex;
+    }
+
+    // ===== 扣枪触发 =====
+    function tryShot(){
+      const now = Date.now();
+      if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
+      if(aimX==null) return;
+
+      const d = Math.hypot(aimX-cx, aimY-cy);
+      const score = scoreFromDist(d);
+
+      lastShotTs = now;
+      logShot({t:now, score, x:aimX, y:aimY, d});
+    }
+
+    // ===== 主渲染 =====
+    function render(){
+      drawTarget();
+      drawTrail();
+      if(aimX!=null) drawSight(aimX, aimY);
+    }
+
+    // ===== MediaPipe Hands =====
+    let hands=null, camera=null;
+
+    async function start(){
       statusEl.textContent = '请求摄像头权限…';
 
-      hands = new Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-      });
-
+      hands = new Hands({ locateFile: (f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
       hands.setOptions({
         maxNumHands: 1,
         modelComplexity: 1,
-        minDetectionConfidence: 0.6,
-        minTrackingConfidence: 0.6,
+        minDetectionConfidence: 0.65,
+        minTrackingConfidence: 0.65,
       });
 
-      hands.onResults((results) => {
-        const lm = results.multiHandLandmarks?.[0];
-        if (!lm) {
-          statusEl.textContent = '未检测到手（把食指伸直，手进入画面中央）';
-          drawScene();
+      hands.onResults((res)=>{
+        const lmList = res.multiHandLandmarks || [];
+        const hdList = res.multiHandedness || [];
+
+        // 找 Right 手
+        let idx = -1;
+        for(let i=0;i<hdList.length;i++){
+          const label = hdList[i]?.label || hdList[i]?.classification?.[0]?.label;
+          if(label === 'Right'){ idx = i; break; }
+        }
+        if(idx === -1 || !lmList[idx]){
+          statusEl.textContent = '未检测到右手（Right）';
+          render();
           return;
         }
-        statusEl.textContent = '检测到手 ✅（移动食指指尖进行瞄准）';
 
-        // 食指指尖 landmark = 8
-        const tip = lm[8];
-        const {px, py} = mapToScreen(tip.x, tip.y);
+        statusEl.textContent = '右手检测 ✅（食指移动瞄准；弯曲=扣枪）';
 
-        if (aimX == null) {
-          aimX = px; aimY = py;
-        } else {
-          aimX = ema(aimX, px, followAlpha);
-          aimY = ema(aimY, py, followAlpha);
+        const lm = lmList[idx];
+
+        // 关键点：食指 MCP=5, PIP=6, TIP=8
+        const mcp = lm[5], pip = lm[6], tip = lm[8];
+
+        // 准星位置：用 tip
+        const p = mapToScreen(tip.x, tip.y);
+        if(aimX==null){ aimX=p.px; aimY=p.py; }
+        else{
+          aimX = ema(aimX, p.px, followAlpha);
+          aimY = ema(aimY, p.py, followAlpha);
+        }
+        pushTrail(aimX, aimY);
+
+        // 扣枪：用食指关节角度（越直越接近 180）
+        const A = mapToScreen(mcp.x, mcp.y);
+        const B = mapToScreen(pip.x, pip.y);
+        const C = mapToScreen(tip.x, tip.y);
+        const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
+
+        // 状态机：先“直”，再“弯”触发一次
+        if(ang >= STRAIGHT_DEG) wasStraight = true;
+        if(wasStraight && ang <= BENT_DEG){
+          wasStraight = false;
+          tryShot();
         }
 
-        pushTrail(aimX, aimY);
-        drawScene();
+        render();
       });
 
-      // Camera utils
       camera = new Camera(video, {
-        onFrame: async () => {
-          await hands.send({image: video});
-        },
-        width: 640,
-        height: 480,
-        facingMode,
+        onFrame: async ()=>{ await hands.send({image: video}); },
+        width: 640, height: 480,
+        facingMode
       });
 
       await camera.start();
       statusEl.textContent = '运行中…';
-      drawScene();
+      render();
     }
 
-    btnClear.addEventListener('click', () => {
-      trail = [];
-    });
+    btnClear.addEventListener('click', ()=>{ trail=[]; render(); });
 
-    btnCal.addEventListener('click', () => {
-      // 将当前 aim 点校准到靶心
-      if (aimX == null) return;
+    btnCal.addEventListener('click', ()=>{
+      if(aimX==null) return;
       calOffX += (cx - aimX);
       calOffY += (cy - aimY);
       trail = [];
+      render();
     });
 
-    btnFlip.addEventListener('click', async () => {
-      facingMode = (facingMode === 'user') ? 'environment' : 'user';
-      // 重启 camera
-      try {
-        if (camera) camera.stop();
-      } catch {}
-      aimX = aimY = null;
-      trail = [];
-      calOffX = calOffY = 0;
+    btnFlip.addEventListener('click', async ()=>{
+      facingMode = (facingMode==='user') ? 'environment' : 'user';
+      try{ camera && camera.stop(); }catch{}
+      aimX=aimY=null; trail=[]; calOffX=calOffY=0; wasStraight=false;
       await start();
     });
 
-    // 启动
-    start().catch(err => {
+    start().catch(err=>{
       console.error(err);
-      statusEl.textContent = '启动失败：请在 https 环境打开，或允许摄像头权限。';
+      statusEl.textContent = '启动失败：请在 https 打开并允许摄像头权限';
+      render();
     });
   </script>
 </body>
