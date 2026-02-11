@@ -75,8 +75,6 @@
         <div><b>Finger Rifle</b> <span class="muted">右手食指瞄准 · 左手【捏合】开火</span></div>
         <span id="status" class="pill">初始化…</span>
         <button id="btnCal">校准准心（需双手）</button>
-        <button id="btnClear">清空轨迹</button>
-        <button id="btnFlip">切换前/后摄像头</button>
         <span class="muted" id="hint"></span>
       </div>
       <div id="log"></div>
@@ -97,23 +95,33 @@
     const flashEl = document.getElementById('flash');
     const hintEl = document.getElementById('hint');
     const btnCal = document.getElementById('btnCal');
-    const btnClear = document.getElementById('btnClear');
-    const btnFlip = document.getElementById('btnFlip');
 
     // Canvas size
     let W=0,H=0,DPR=1,cx=0,cy=0;
+    let rectW=0, rectH=0, shortCss=0;
+
     function resize(){
       DPR = Math.max(1, window.devicePixelRatio || 1);
+
       const rect = leftPane.getBoundingClientRect();
-      W = Math.max(1, Math.floor(rect.width * DPR));
-      H = Math.max(1, Math.floor(rect.height * DPR));
+      rectW = rect.width;
+      rectH = rect.height;
+      shortCss = Math.max(1, Math.min(rectW, rectH)); // 用 CSS px 做“观感归一化”
+
+      W = Math.max(1, Math.floor(rectW * DPR));
+      H = Math.max(1, Math.floor(rectH * DPR));
+
       canvas.width = W; canvas.height = H;
-      canvas.style.width = rect.width+'px';
-      canvas.style.height = rect.height+'px';
+      canvas.style.width = rectW+'px';
+      canvas.style.height = rectH+'px';
+
       cx = W/2; cy = H/2;
+
+      // ✅ 让 iPad / 手机抖动观感更接近：按屏幕短边做归一化增益
+      //    同时手机比你当前更敏感一点：对小屏额外加成
+      tuneAimByScreen();
     }
     addEventListener('resize', resize);
-    resize();
 
     // Camera
     let facingMode = 'user';
@@ -131,7 +139,6 @@
     // ============================================
     const targetSquareHalf = 110;   // 靶纸边长的一半（逻辑像素）
     const targetDotR = 22;          // 靶心黑点半径（逻辑像素）
-
     const sight_outer_r = 120;      // 外圈半径（逻辑像素）
     const sight_inner_r = 44;       // 内环半径（逻辑像素）
 
@@ -142,47 +149,85 @@
     const trailMax = 320;
     const trailMinMove = 0.05;
 
-    // Aim
+    // ============================================
+    // Aim（准星）——会被 tuneAimByScreen() 动态设置
+    // ============================================
     let aimX=null, aimY=null;
-    const followAlpha = 0.97;
-    let sensitivity = 2.4;
+    let followAlpha = 0.97;   // EMA 跟随系数（越大越敏感/越抖）
+    let sensitivity = 2.4;    // 准星增益（越大越敏感/越抖）
 
+    // ✅ iPad / 手机抖动观感归一化 + 手机更敏感一点
+    function tuneAimByScreen(){
+      const REF_SHORT = 390; // 以典型手机短边做参考（CSS px）
+      const isPhoneLike = shortCss < 520; // 简单判定（小屏）
+
+      // baseGain：你现在 2.4，手机要更敏感一点 -> 2.7 起步
+      const baseGain = 2.7;
+
+      // 归一化：屏幕越大，增益越小（避免 iPad 看起来天然更敏感）
+      // 例如 iPad 短边 768：gain ≈ 2.7*(390/768)=1.37
+      let gain = baseGain * (REF_SHORT / shortCss);
+
+      // 手机额外加成（让手机比当前更敏感）
+      if(isPhoneLike) gain *= 1.18;
+
+      // 限幅：防止极端尺寸
+      sensitivity = Math.min(3.6, Math.max(1.1, gain));
+
+      // EMA：手机更跟手，iPad 稍微滤一点以拉平观感
+      followAlpha = isPhoneLike ? 0.985 : 0.965;
+    }
+
+    // ============================================
     // Calibration
+    // ============================================
     let calOffX = 0, calOffY = 0;
     const CAL_FRAMES_NEED = 20;
     const CAL_STABLE_RMS_PX = 6;
     let calBuf = [];
     let calOkFrames = 0;
 
-    // Trigger (Pinch)
+    // ============================================
+    // Trigger（A 方案：自适应阈值 + 扳机锁，避免双发）
+    // ============================================
     let isPinched = false;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    // 更准确捏合：用“归一化捏合比值 + 更长确认帧 + 更大迟滞”
-    const PINCH_ON_RATIO  = 0.36;   // 越小越严格（更难触发）
-    const PINCH_OFF_RATIO = 0.46;   // 迟滞：避免抖动反复触发
-    const PINCH_ON_FRAMES = 2;      // 连续多少帧满足才算捏合
-    const PINCH_OFF_FRAMES= 2;      // 连续多少帧松开才算松开
+    // 自适应基线（EMA）
+    let openBaseline = 0.58;   // 张开时 ratio 典型更大
+    let closedBaseline = 0.34; // 捏合时 ratio 典型更小
+
+    // EMA 强度：越大越“跟随当下”，越小越“更稳”
+    const BASELINE_EMA = 0.10;
+
+    // 动态阈值系数（在 open/closed 之间插值）
+    // ON 越靠近 closed -> 更严格；越靠近 open -> 更容易触发
+    const ON_POS  = 0.25;
+    const OFF_POS = 0.55;
+
+    // 连续帧确认（不让它难触发：ON 用 1~2 帧，OFF 用 2~3 帧）
+    const PINCH_ON_FRAMES  = 1;
+    const PINCH_OFF_FRAMES = 2;
+
     let pinchOnCount = 0;
     let pinchOffCount = 0;
+
+    // 扳机锁：开火后必须“明确松开”才允许下一枪（根治双发）
+    let triggerLocked = false;
 
     // Freeze
     const FREEZE_MS = 220;
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
-    // Lock
+    // Lock（第一枪前锁定）
     const LOCK_DIST_PX = 38;
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
 
     // ============================================
-    // ✅ 线性计分（触碰内环=6.0；中心=10.9；更远线性到0）
-    // 解释：
-    // - d = 0 -> 10.9
-    // - 当“黑点边缘触碰内环”时：d_ref = Rin - Rb -> score = 6.0
-    // - 超出内环外也继续线性下降，直到 <=0 记为 0.0
+    // ✅ 线性计分（中心=10.9；黑点边缘触碰内环=6.0；更远线性到0）
     // ============================================
     const CENTER_SCORE = 10.9;
     const TOUCH_SCORE  = 6.0;
@@ -197,12 +242,10 @@
       const d_ref = Math.max(1e-6, Rin - Rb);
 
       // 线性斜率：到 d_ref 时下降 (CENTER_SCORE - TOUCH_SCORE)
-      const dropAtRef = (CENTER_SCORE - TOUCH_SCORE); // 4.9
-      const constant = d_ref / dropAtRef;             // score = 10.9 - d/constant
+      const dropAtRef = (CENTER_SCORE - TOUCH_SCORE);
+      const constant = d_ref / dropAtRef; // score = 10.9 - d/constant
 
       let score = CENTER_SCORE - (d / constant);
-
-      // 0~10.9 clamp，并保留 0.1
       score = Math.max(0, Math.min(CENTER_SCORE, score));
       return Math.round(score * 10) / 10;
     }
@@ -221,6 +264,9 @@
         }
       }
       logEl.textContent = out.trim() || '';
+
+      // ✅ 超出可视区域：自动滚到底
+      logEl.scrollTop = logEl.scrollHeight;
     }
 
     // Utils
@@ -229,6 +275,7 @@
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
       if(facingMode==='user') x = 1 - x;
+
       let px = x * W + calOffX;
       let py = y * H + calOffY;
 
@@ -298,9 +345,9 @@
     function drawTrail(){
       if(trail.length<2) return;
 
-      // 🔴 红色进枪线 + “略粗一点点”
-      ctx.lineWidth = 4*DPR; // 原来 3*DPR -> 4*DPR
-      ctx.strokeStyle = 'rgba(0,0,0,0)';
+      // 🔴 纯红、不透明
+      ctx.lineWidth = 4*DPR;
+      ctx.strokeStyle = 'rgb(255,0,0)';
       ctx.beginPath();
       ctx.moveTo(trail[0].x, trail[0].y);
       for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
@@ -313,19 +360,19 @@
       r.h = Math.max(0,r.h);
 
       ctx.save();
-      ctx.strokeStyle = 'rgba(0,0,0)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 3*DPR;
       ctx.setLineDash([10*DPR, 10*DPR]);
       ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.setLineDash([]);
 
-      ctx.fillStyle = 'rgba(0,0,0,1)';
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.font = `${14*DPR}px system-ui,sans-serif`;
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left';
-      ctx.fillText('左手手掌瞄准', r.x+10, r.y+10);
+      ctx.fillText('左侧:右手食指瞄准', r.x+10, r.y+10);
       ctx.textAlign = 'right';
-      ctx.fillText('右手捏合射击', r.x+r.w-10, r.y+10);
+      ctx.fillText('右侧:左手捏合开枪', r.x+r.w-10, r.y+10);
 
       let msg = '';
       if(!haveLeft || !haveRight) msg = '请双手入框（尽量左右分开）';
@@ -433,43 +480,86 @@
 
       if(mode === MODE.READY && bootState === BOOT.PLAY) pushTrail(aimX, aimY);
 
-      // 2) 左手：更准确捏合（用“距离/手指长度”的归一化比值）
-      const lThumb = leftLm[4];
-      const lIndex = leftLm[8];
-      const lMcp   = leftLm[5];   // index MCP
+      // 2) 左手：A 方案（自适应阈值）
+      //    ratio = pinch距离 / 手掌尺度（更稳：用 wrist(0) <-> index_mcp(5)）
+      const lThumb = leftLm[4]; // thumb tip
+      const lIndex = leftLm[8]; // index tip
+      const wrist  = leftLm[0];
+      const iMcp   = leftLm[5];
 
-      // ⚠️ 捏合判断不要用 mapToScreen（会受 sensitivity 放大影响），直接用归一化坐标更稳
       const pinchD = Math.hypot(lThumb.x - lIndex.x, lThumb.y - lIndex.y);
-      const scale  = Math.max(1e-6, Math.hypot(lMcp.x - lIndex.x, lMcp.y - lIndex.y)); // 食指长度量级
-      const ratio  = pinchD / scale;
+      const palmS  = Math.max(1e-6, Math.hypot(wrist.x - iMcp.x, wrist.y - iMcp.y));
+      const ratio  = pinchD / palmS;
+
+      // 更新基线：未捏合时更新 open，捏合时更新 closed
+      if(!isPinched){
+        openBaseline = ema(openBaseline, ratio, BASELINE_EMA);
+      }else{
+        closedBaseline = ema(closedBaseline, ratio, BASELINE_EMA);
+      }
+
+      // 保证 open > closed（避免极端抖动导致反转）
+      if(openBaseline < closedBaseline + 1e-3){
+        const mid = (openBaseline + closedBaseline) / 2;
+        openBaseline = mid + 0.01;
+        closedBaseline = mid - 0.01;
+      }
+
+      const span = Math.max(1e-6, openBaseline - closedBaseline);
+      const PINCH_ON  = closedBaseline + ON_POS  * span;
+      const PINCH_OFF = closedBaseline + OFF_POS * span;
 
       const allowFire = (mode === MODE.READY) && (bootState === BOOT.PLAY || lockReady);
 
       if(allowFire){
-        if(ratio < PINCH_ON_RATIO){
-          pinchOnCount++;
-          pinchOffCount = 0;
-        }else if(ratio > PINCH_OFF_RATIO){
-          pinchOffCount++;
-          pinchOnCount = 0;
+        // 扳机锁：开火后，必须松开（ratio 连续 > OFF）才解锁
+        if(triggerLocked){
+          if(ratio > PINCH_OFF){
+            pinchOffCount++;
+            if(pinchOffCount >= PINCH_OFF_FRAMES){
+              triggerLocked = false;
+              isPinched = false;
+              pinchOffCount = 0;
+              pinchOnCount = 0;
+            }
+          }else{
+            pinchOffCount = 0;
+          }
         }else{
-          // 在迟滞区间：不改变计数，保持状态
-          pinchOnCount = Math.max(0, pinchOnCount-1);
-          pinchOffCount= Math.max(0, pinchOffCount-1);
-        }
+          // 正常捏合检测
+          if(ratio < PINCH_ON){
+            pinchOnCount++;
+            pinchOffCount = 0;
+          }else if(ratio > PINCH_OFF){
+            pinchOffCount++;
+            pinchOnCount = 0;
+          }else{
+            // 迟滞区：轻微衰减计数，避免“卡边界”
+            pinchOnCount = Math.max(0, pinchOnCount - 1);
+            pinchOffCount = Math.max(0, pinchOffCount - 1);
+          }
 
-        if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
-          isPinched = true;
-          pinchOnCount = 0;
-          fire();
-        }
+          // 触发：从未捏合 -> 捏合成立
+          if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
+            isPinched = true;
+            pinchOnCount = 0;
 
-        if(isPinched && pinchOffCount >= PINCH_OFF_FRAMES){
-          isPinched = false;
-          pinchOffCount = 0;
+            fire();
+
+            // 开火后立刻锁住，直到明确松开（根治双发）
+            triggerLocked = true;
+            pinchOffCount = 0;
+          }
+
+          // 松开：用于维持 isPinched 状态（即使不用它来允许二次开火，也让基线更新更合理）
+          if(isPinched && ratio > PINCH_OFF && pinchOffCount >= PINCH_OFF_FRAMES){
+            isPinched = false;
+            pinchOffCount = 0;
+          }
         }
       }else{
         isPinched = false;
+        triggerLocked = false;
         pinchOnCount = pinchOffCount = 0;
       }
 
@@ -542,8 +632,11 @@
 
         if(!hL || !hR){
           mode = MODE.WAIT_BOTH;
+
           isPinched = false;
+          triggerLocked = false;
           pinchOnCount = pinchOffCount = 0;
+
           updateBootState(hL,hR);
           render(hL,hR);
           return;
@@ -574,18 +667,6 @@
       calOkFrames=0; calBuf=[]; trail=[];
       btnCal.disabled=true;
       statusEl.textContent = '校准中...';
-    };
-
-    btnClear.onclick = ()=>{ trail=[]; render(true,true); };
-
-    btnFlip.onclick = async ()=>{
-      facingMode = (facingMode==='user')?'environment':'user';
-      try{camera&&camera.stop()}catch{}
-      aimX=aimY=null; trail=[]; calOffX=calOffY=0;
-      isPinched=false; pinchOnCount = pinchOffCount = 0;
-      bootState=BOOT.NEED_BOTH; firstShotDone=false;
-      video.style.opacity='1'; video.style.pointerEvents='auto';
-      await start();
     };
 
     start().catch(e=>{
