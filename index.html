@@ -160,10 +160,10 @@
     let lastShotTs = 0;
 
     // 更准确捏合：用“归一化捏合比值 + 更长确认帧 + 更大迟滞”
-    const PINCH_ON_RATIO  = 0.28;   // 越小越严格（更难触发）
-    const PINCH_OFF_RATIO = 0.34;   // 迟滞：避免抖动反复触发
-    const PINCH_ON_FRAMES = 3;      // 连续多少帧满足才算捏合
-    const PINCH_OFF_FRAMES= 3;      // 连续多少帧松开才算松开
+    const PINCH_ON_RATIO  = 0.36;   // 越小越严格（更难触发）
+    const PINCH_OFF_RATIO = 0.46;   // 迟滞：避免抖动反复触发
+    const PINCH_ON_FRAMES = 2;      // 连续多少帧满足才算捏合
+    const PINCH_OFF_FRAMES= 2;      // 连续多少帧松开才算松开
     let pinchOnCount = 0;
     let pinchOffCount = 0;
 
