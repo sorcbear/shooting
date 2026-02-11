@@ -9,10 +9,7 @@
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
     #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
-    #leftPane{
-      position:relative; flex:0 0 66.6667%; min-height:0;
-      background:#fff; overflow:hidden;
-    }
+    #leftPane{position:relative; flex:0 0 66.6667%; min-height:0; background:#fff; overflow:hidden;}
     #rightPane{
       position:relative; flex:0 0 33.3333%; min-height:0;
       background:#fff; border-top:1px solid #eee;
@@ -22,20 +19,14 @@
     @media (orientation: landscape){
       #app{flex-direction:row;}
       #leftPane{flex:0 0 66.6667%; height:100vh;}
-      #rightPane{
-        flex:0 0 33.3333%; height:100vh;
-        border-top:none; border-left:1px solid #eee;
-      }
+      #rightPane{flex:0 0 33.3333%; height:100vh; border-top:none; border-left:1px solid #eee;}
     }
     #video{
       position:absolute; inset:0; width:100%; height:100%;
       object-fit:cover; transform:scaleX(-1); z-index:0;
       background:#000; opacity:1; transition:opacity 120ms linear;
     }
-    #cv{
-      position:absolute; inset:0; width:100%; height:100%;
-      touch-action:none; z-index:1;
-    }
+    #cv{position:absolute; inset:0; width:100%; height:100%; touch-action:none; z-index:1;}
     #hud{
       font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       color:#111;background:rgba(255,255,255,.96);
@@ -82,7 +73,9 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
 
   <script>
+    // =========================
     // DOM
+    // =========================
     const leftPane = document.getElementById('leftPane');
     const video = document.getElementById('video');
     const canvas = document.getElementById('cv');
@@ -92,63 +85,60 @@
     const flashEl = document.getElementById('flash');
     const hintEl = document.getElementById('hint');
 
-    // Canvas size
-    let W=0,H=0,DPR=1,cx=0,cy=0;
-    let rectW=0, rectH=0, shortCss=0;
-
-    function isIPhoneLike(){
-      // UA 优先；识别不到再 fallback 屏幕短边
+    // =========================
+    // 设备识别：iPhone / iPad / other
+    // =========================
+    function getDeviceType(){
       const ua = navigator.userAgent || '';
       const isiPhone = /iPhone/.test(ua);
-      const isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua)); // iPadOS
-      if(isiPhone) return true;
-      if(isiPad) return false;
-      return shortCss < 520;
+      // iPadOS: iPad 或 Macintosh + Mobile
+      const isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua));
+      if(isiPhone) return 'iphone';
+      if(isiPad) return 'ipad';
+      return 'other';
     }
 
-    // Aim（准星）——会被 tuneAimByDevice() 动态设置
+    // =========================
+    // ✅ iPhone / iPad 独立参数（你只需要改这里）
+    // followAlpha 越接近 1 越抖、越跟手
+    // sensitivity 越大，准星位移放大越大（更抖）
+    // =========================
+    const AIM_PARAMS = {
+      iphone: { followAlpha: 0.9988, sensitivity: 4.10 },
+      ipad:   { followAlpha: 0.9720, sensitivity: 2.05 },
+      other:  { followAlpha: 0.9850, sensitivity: 3.00 },
+    };
+
+    // Aim（准星）
     let aimX=null, aimY=null;
-    let followAlpha = 0.97;   // EMA 跟随系数（越大越敏感/越抖）
-    let sensitivity = 2.4;    // 准星增益（越大越敏感/越抖）
+    let followAlpha = AIM_PARAMS.other.followAlpha;
+    let sensitivity = AIM_PARAMS.other.sensitivity;
 
-    // ✅ 分开调 iPhone / iPad 抖动
-    function tuneAimByDevice(){
-      const phone = isIPhoneLike();
-
-      // 你要“手机更敏感”，同时让 iPad/手机抖动观感接近
-      // - iPhone：更抖、更跟手
-      // - iPad：稍微滤一点（不至于大屏看起来更“飘”）
-      followAlpha = phone ? 0.995 : 0.975;
-
-      // 增益：按短边归一化后再做手机额外加成
-      const REF_SHORT = 390;
-      const baseGainPhone = 3.15;
-      const baseGainPad   = 1.85;
-      const base = phone ? baseGainPhone : baseGainPad;
-
-      let gain = base * (REF_SHORT / Math.max(1, shortCss));
-      // 限幅
-      sensitivity = Math.min(4.2, Math.max(1.1, gain));
+    function applyAimParams(){
+      const t = getDeviceType();
+      followAlpha = AIM_PARAMS[t].followAlpha;
+      sensitivity = AIM_PARAMS[t].sensitivity;
     }
 
+    // =========================
+    // Canvas size
+    // =========================
+    let W=0,H=0,DPR=1,cx=0,cy=0;
     function resize(){
       DPR = Math.max(1, window.devicePixelRatio || 1);
 
       const rect = leftPane.getBoundingClientRect();
-      rectW = rect.width;
-      rectH = rect.height;
-      shortCss = Math.max(1, Math.min(rectW, rectH)); // CSS px
-
-      W = Math.max(1, Math.floor(rectW * DPR));
-      H = Math.max(1, Math.floor(rectH * DPR));
+      W = Math.max(1, Math.floor(rect.width * DPR));
+      H = Math.max(1, Math.floor(rect.height * DPR));
 
       canvas.width = W; canvas.height = H;
-      canvas.style.width = rectW+'px';
-      canvas.style.height = rectH+'px';
+      canvas.style.width = rect.width+'px';
+      canvas.style.height = rect.height+'px';
 
       cx = W/2; cy = H/2;
 
-      tuneAimByDevice();
+      // ✅ 每次 resize 重新应用设备参数（保持 iPhone / iPad 分开）
+      applyAimParams();
     }
     addEventListener('resize', resize);
     resize();
@@ -156,25 +146,25 @@
     // Camera
     let facingMode = 'user';
 
-    // States（简化：不再有“校准中”模式按钮；第一发作为校准，不计分）
+    // =========================
+    // States：第一发为“校准发”（不计分）
+    // =========================
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', PLAY:'PLAY' };
     let mode = MODE.WAIT_BOTH;
 
-    let firstShotDone = false; // 第一发（校准发）完成
+    let firstShotDone = false; // 校准发完成后才计分
     let lockReady = false;
 
-    // ============================================
+    // =========================
     // 靶心/瞄具
-    // ============================================
-    const targetSquareHalf = 110;   // 靶纸边长的一半（逻辑像素）
-    const targetDotR = 22;          // 靶心黑点半径（逻辑像素）
-    const sight_outer_r = 120;      // 外圈半径（逻辑像素）
-    const sight_inner_r = 44;       // 内环半径（逻辑像素）
+    // =========================
+    const targetSquareHalf = 110;  // 靶纸边长的一半（逻辑像素）
+    const targetDotR = 22;         // 靶心黑点半径（逻辑像素）
+    const sight_outer_r = 120;
+    const sight_inner_r = 44;
 
-    // ============================================
-    // Trail（你说不要红线：保持不画）
-    // ============================================
-    let trail = []; // 保留结构但不画
+    // 不画红线（保留结构但不绘制）
+    let trail = [];
     const trailMax = 320;
     const trailMinMove = 0.05;
 
@@ -188,15 +178,14 @@
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
 
-    // ============================================
-    // ✅ 线性计分（中心=10.9；黑点边缘触碰内环=6.0；更远线性到0）
-    // ============================================
+    // =========================
+    // 计分（中心=10.9，触碰内环=6.0）
+    // =========================
     const CENTER_SCORE = 10.9;
     const TOUCH_SCORE  = 6.0;
 
     function scoreFromAimPos(aimX_px, aimY_px){
       const d = Math.hypot(aimX_px - cx, aimY_px - cy);
-
       const Rb  = targetDotR * DPR;
       const Rin = sight_inner_r * DPR;
 
@@ -209,18 +198,16 @@
       return Math.round(score * 10) / 10;
     }
 
-    // Scores（倒序：最新在最上）
+    // Scores：倒序显示（最新在最上）
     let shotScores = [];
     function renderScores(){
       let out = '';
       for(let i=shotScores.length-1;i>=0;i--){
         const idx = i+1;
         out += `${idx}.  ${shotScores[i].toFixed(1)}\n`;
-        // 仍按正序10发一组统计：这里给你“快速总分”，倒序显示不做分段统计，避免混乱
       }
       logEl.textContent = out.trim() || '';
-      // ✅ 自动滚到顶部（因为最新在最上）
-      logEl.scrollTop = 0;
+      logEl.scrollTop = 0; // 最新在最上 -> 固定滚到顶部
     }
 
     // Utils
@@ -233,7 +220,6 @@
       let px = x * W;
       let py = y * H;
 
-      // 灵敏度（增益）
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
 
@@ -288,7 +274,6 @@
 
     function drawGuideOverlay(haveLeft, haveRight){
       ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,0.72)';
       ctx.font = `${16*DPR}px system-ui,sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -297,10 +282,10 @@
       if(!haveLeft || !haveRight) msg = '请双手入框（尽量左右分开）';
       else if(!lockReady) msg = '请将准星对准靶心...';
       else if(!firstShotDone) msg = '已锁定 ✅ 捏合打一发“校准发”（不计分）';
-      else msg = 'READY ✅ 捏合开火';
+      else msg = 'READY ✅ 左手完全捏合开火';
 
       const mw = ctx.measureText(msg).width + 44*DPR;
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.fillRect(cx-mw/2, cy-24*DPR, mw, 48*DPR);
       ctx.fillStyle = '#000';
       ctx.fillText(msg, cx, cy);
@@ -333,36 +318,26 @@
       }catch{}
     }
 
-    // ============================================
-    // ✅ 扳机（更高要求：必须“完全捏合”才触发）
-    // 关键点：
-    // 1) 用 ratio = pinchD / palmS（与距离/大小无关）
-    // 2) 增加“完全捏合”门槛：需要 ratio 非常小才算 ON
-    // 3) 用“速度门槛”拒绝误触：必须在短时间内明显闭合（可选）
-    // 4) 扳机锁：开火后必须明确松开才允许下一枪（防双发）
-    // ============================================
+    // =========================
+    // ✅ 扳机：更严格“完全捏合”
+    // =========================
     let isPinched = false;
     let triggerLocked = false;
 
-    const SHOT_COOLDOWN_MS = 450;
+    const SHOT_COOLDOWN_MS = 420;
     let lastShotTs = 0;
 
-    // ✅ 更严格的固定阈值（不用自适应，避免学坏导致误触）
-    // 你要“手指完全捏合”：把 ON 拉低，OFF 拉高，迟滞更大
-    const PINCH_ON  = 0.28;  // 越小越要求“完全贴合”
-    const PINCH_OFF = 0.36;  // 松开要明显，防抖
+    // ✅ 这里是“严格度”核心：你要更严格就把 ON 再调小一点
+    // 经验值：0.22~0.30
+    const PINCH_ON  = 0.24;  // 必须很贴合才算捏合（更严格）
+    const PINCH_OFF = 0.34;  // 必须明显松开才复位（防双发/抖动）
 
-    // 连续帧确认：要求“稳定贴合”2-3帧才触发（不会太难，但能砍掉误触）
+    // 连续帧确认：既不难触发，又能砍掉误触
     const PINCH_ON_FRAMES  = 2;
     const PINCH_OFF_FRAMES = 3;
 
-    // “闭合速度”门槛：必须是主动捏合而不是抖动碰到（越大越严格）
-    // 设为 0 表示不用这个门槛
-    const CLOSE_SPEED_MIN = 0;
-
     let pinchOnCount = 0;
     let pinchOffCount = 0;
-    let ratioPrev = null;
 
     function fire(isCalibrationShot){
       const now = Date.now();
@@ -379,13 +354,14 @@
       beep();
 
       if(isCalibrationShot){
-        // 第一发校准：不计分，只进入正式模式并隐藏视频
         firstShotDone = true;
         mode = MODE.PLAY;
+
         video.style.opacity = '0';
         video.style.pointerEvents = 'none';
+
         statusEl.textContent = '校准完成 ✅ 正式开始';
-        hintEl.textContent = '左手“完全捏合”=开枪';
+        hintEl.textContent = '左手完全捏合=开枪';
         return;
       }
 
@@ -394,7 +370,7 @@
       renderScores();
 
       statusEl.textContent = 'READY ✅';
-      hintEl.textContent = '左手“完全捏合”=开枪';
+      hintEl.textContent = '左手完全捏合=开枪';
     }
 
     // MediaPipe
@@ -409,7 +385,7 @@
       const now = Date.now();
       if(now < freezeUntil) return;
 
-      // 1) 右手：准星 -> index tip(8)
+      // 1) 右手：准星
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
@@ -421,9 +397,9 @@
 
       if(mode === MODE.PLAY) pushTrail(aimX, aimY);
 
-      // 2) 左手：捏合检测（严格）
-      const lThumb = leftLm[4]; // thumb tip
-      const lIndex = leftLm[8]; // index tip
+      // 2) 左手：捏合 ratio（尺度无关）
+      const lThumb = leftLm[4];
+      const lIndex = leftLm[8];
       const wrist  = leftLm[0];
       const iMcp   = leftLm[5];
 
@@ -431,20 +407,15 @@
       const palmS  = Math.max(1e-6, Math.hypot(wrist.x - iMcp.x, wrist.y - iMcp.y));
       const ratio  = pinchD / palmS;
 
-      const closeSpeed = (ratioPrev==null) ? 0 : (ratioPrev - ratio); // 正数表示“在闭合”
-      ratioPrev = ratio;
-
-      // 允许开火：已锁定即可（第一发用来校准），正式开始后一直可用
-      const allowFire = lockReady;
-
-      if(!allowFire){
+      // 允许开火：只要已经 lockReady（第一发也走这里，但不计分）
+      if(!lockReady){
         isPinched = false;
         triggerLocked = false;
         pinchOnCount = pinchOffCount = 0;
         return;
       }
 
-      // 扳机锁：必须明确松开才解锁
+      // 扳机锁：必须明确松开才能再次击发（根治双发）
       if(triggerLocked){
         if(ratio > PINCH_OFF){
           pinchOffCount++;
@@ -460,33 +431,26 @@
         return;
       }
 
-      // 触发条件：ratio 很小 + 连续帧 +（可选）闭合速度足够
-      const speedOk = (CLOSE_SPEED_MIN <= 0) ? true : (closeSpeed >= CLOSE_SPEED_MIN);
-
-      if(ratio < PINCH_ON && speedOk){
+      // 正常捏合检测
+      if(ratio < PINCH_ON){
         pinchOnCount++;
         pinchOffCount = 0;
       }else if(ratio > PINCH_OFF){
         pinchOffCount++;
         pinchOnCount = 0;
       }else{
-        // 迟滞区：轻微衰减计数，避免卡边界
         pinchOnCount = Math.max(0, pinchOnCount - 1);
         pinchOffCount= Math.max(0, pinchOffCount - 1);
       }
 
+      // 触发
       if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
         isPinched = true;
         pinchOnCount = 0;
 
-        // 第一发：校准发，不计分
-        if(!firstShotDone){
-          fire(true);
-        }else{
-          fire(false);
-        }
+        if(!firstShotDone) fire(true);
+        else fire(false);
 
-        // 开火后立即锁住，直到明确松开（防双发）
         triggerLocked = true;
         pinchOffCount = 0;
       }
@@ -501,12 +465,12 @@
 
         statusEl.textContent = '等待双手...';
         hintEl.textContent = '右手食指瞄准，左手完全捏合开火';
+
         video.style.opacity = '1';
         video.style.pointerEvents = 'auto';
         return;
       }
 
-      // 锁定：准星靠近靶心若干帧
       if(aimX==null){
         lockFrames = 0;
         lockReady = false;
@@ -526,7 +490,7 @@
         }else{
           mode = MODE.PLAY;
           statusEl.textContent = 'READY ✅';
-          hintEl.textContent = '左手“完全捏合”=开枪';
+          hintEl.textContent = '左手完全捏合=开枪';
         }
       }else{
         lockReady = false;
@@ -558,9 +522,7 @@
         const hL = lIdx!==-1 && lm[lIdx], hR = rIdx!==-1 && lm[rIdx];
 
         if(!hL || !hR){
-          // reset
           aimX = aimY = null;
-          ratioPrev = null;
           isPinched = false;
           triggerLocked = false;
           pinchOnCount = pinchOffCount = 0;
@@ -577,6 +539,7 @@
         render(true,true);
       });
 
+      // reset state
       video.style.opacity = '1';
       video.style.pointerEvents = 'auto';
       firstShotDone = false;
@@ -584,6 +547,7 @@
       lockFrames = 0;
       mode = MODE.WAIT_BOTH;
 
+      // 镜像
       video.style.transform = (facingMode==='user')?'scaleX(-1)':'none';
 
       camera = new Camera(video, {
