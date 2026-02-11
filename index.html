@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="format-detection" content="telephone=no,address=no,email=no">
-  <title>Air Finger Rifle - ISSF Edition</title>
+  <title>Air Finger Rifle - Exact Logic</title>
 
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
@@ -72,11 +72,11 @@
 
     <div id="rightPane">
       <div id="hud">
-        <div><b>Finger Rifle</b> <span class="muted">右手食指瞄准 · 左手【捏合】开火</span></div>
+        <div><b>Finger Rifle</b> <span class="muted">瞄准:右手 · 开火:左手捏合</span></div>
         <span id="status" class="pill">初始化…</span>
-        <button id="btnCal">校准准心（需双手）</button>
-        <button id="btnClear">清空轨迹</button>
-        <button id="btnFlip">切换前/后摄像头</button>
+        <button id="btnCal">校准</button>
+        <button id="btnClear">清空</button>
+        <button id="btnFlip">翻转</button>
         <span class="muted" id="hint"></span>
       </div>
       <div id="log"></div>
@@ -87,7 +87,24 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
 
   <script>
-    // DOM
+    // ==========================================
+    // ✅ 物理/像素 换算核心逻辑 (Strict Scale)
+    // ==========================================
+    
+    // 1. 设定：屏幕上的黑色实心圆半径为 55px
+    const VISUAL_BLACK_R_PX = 55;
+
+    // 2. 设定：这个黑圆对应现实中的 8.0环 (分数边界)
+    //    公式推导：8.0 = 10.9 - (r / 2.5)
+    //    -> r = (10.9 - 8.0) * 2.5 = 2.9 * 2.5 = 7.25 mm
+    const REAL_MM_AT_BLACK_EDGE = 7.25; 
+
+    // 3. 计算比例尺：1毫米 = 多少像素
+    //    Scale ≈ 7.58 px/mm
+    let PIXELS_PER_MM = 1; // resize时计算
+    
+    // ==========================================
+
     const leftPane = document.getElementById('leftPane');
     const video = document.getElementById('video');
     const canvas = document.getElementById('cv');
@@ -100,7 +117,6 @@
     const btnClear = document.getElementById('btnClear');
     const btnFlip = document.getElementById('btnFlip');
 
-    // Canvas size
     let W=0,H=0,DPR=1,cx=0,cy=0;
     function resize(){
       DPR = Math.max(1, Math.floor(window.devicePixelRatio||1));
@@ -111,14 +127,15 @@
       canvas.style.width = rect.width+'px';
       canvas.style.height = rect.height+'px';
       cx = W/2; cy = H/2;
+      
+      // 更新比例尺 (考虑DPR)
+      // 这里的 VISUAL_BLACK_R_PX 是逻辑像素，乘以 DPR 得到物理像素
+      PIXELS_PER_MM = (VISUAL_BLACK_R_PX * DPR) / REAL_MM_AT_BLACK_EDGE;
     }
     addEventListener('resize', resize);
     resize();
 
-    // Camera
     let facingMode = 'user';
-
-    // States
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
     let mode = MODE.WAIT_BOTH;
     const BOOT = { NEED_BOTH:'NEED_BOTH', NEED_LOCK:'NEED_LOCK', PLAY:'PLAY' };
@@ -126,111 +143,74 @@
     let firstShotDone = false;
     let lockReady = false;
 
-    // Target Visuals
-    const targetSquareHalf = 110;
-    const targetDotR = 22;
+    // Visuals
+    const targetSquareHalf = 120; // 白色背景大小
 
-    // Sight Visuals
-    const sight_outer_r = 120;
-    const sight_inner_black_r = 44; // 视觉上的"黑环"半径
-    // ✅ 修正：黑环边缘(44px)对应 9.0环线
-    // 根据公式 9.0 = 10.9 - (r/2.5) => 1.9 = r/2.5 => r = 4.75mm
-    // 所以：屏幕上的 44px 等于现实的 4.75mm（9环边界距离）
-    const REFERENCE_MM_AT_BLACK_EDGE = 4.75; 
+    // Sight
+    const sight_outer_r = 130; // 外部大圆
 
-    // Trail
     let trail = [];
-    const trailMax = 320;
-    const trailMinMove = 0.35;
-    
-    // Aim (右手)
     let aimX=null, aimY=null;
-    const followAlpha = 0.92;
-    let sensitivity = 2.35; // 灵敏度
+    const followAlpha = 0.90;
+    let sensitivity = 2.4; 
 
-    // Calibration
     let calOffX = 0, calOffY = 0;
     const CAL_FRAMES_NEED = 20;
     const CAL_STABLE_RMS_PX = 6;
     let calBuf = [];
     let calOkFrames = 0;
 
-    // Trigger (左手 - 捏合)
     let isPinched = false;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
-    
-    // Freeze
-    const FREEZE_MS = 220;
+    const FREEZE_MS = 250;
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
-
-    // Lock
-    const LOCK_DIST_PX = 38;
+    const LOCK_DIST_PX = 40;
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
 
     // ============================================
-    // ✅ 核心修改：ISSF 十米气步枪电子靶标准计分
-    // Formula: Score = 10.9 - (r_mm / 2.5)
-    // 参考：黑环边缘 = 9环线 = 4.75mm 距靶心
+    // ✅ 计分函数：逻辑完全换算成像素
     // ============================================
     function scoreFromDist(dpx){
-      // 1. 计算当前屏幕的 px/mm 比例
-      //    黑环半径 sight_inner_black_r (44px) 对应 4.75mm (9环边界)
-      const blackRadiusPx = sight_inner_black_r * DPR;
-      const pixelsPerMm = blackRadiusPx / REFERENCE_MM_AT_BLACK_EDGE;
-
-      // 2. 将当前距离换算为 mm
-      const r_mm = dpx / pixelsPerMm;
-
-      // 3. 代入ISSF公式：每偏离2.5mm掉1环
-      let score = 10.9 - (r_mm / 2.5);
-
-      // 4. 边界处理 (最小0，最大10.9)
+      // dpx 是屏幕物理像素距离
+      
+      // 1. 换算成毫米
+      const mm = dpx / PIXELS_PER_MM;
+      
+      // 2. 套用 ISSF 公式: Score = 10.9 - (r / 2.5)
+      let score = 10.9 - (mm / 2.5);
+      
       score = Math.max(0, Math.min(10.9, score));
-
-      // 5. 保留一位小数 (Round to nearest 0.1)
       return Math.round(score * 10) / 10;
     }
 
     let shotScores = [];
     function renderScores(){
       let out = '';
+      let total = 0;
       for(let i=0;i<shotScores.length;i++){
-        const idx = i+1;
-        out += `${idx}.  ${shotScores[i].toFixed(1)}\n`;
-        if(idx % 10 === 0){
-          const start = idx - 10;
-          const sum = shotScores.slice(start, idx).reduce((a,b)=>a+b,0);
-          out += `Total(${start+1}-${idx}): ${sum.toFixed(1)}\n\n`;
-        }
+        out += `${i+1}. ${shotScores[i].toFixed(1)}\n`;
+        total += shotScores[i];
       }
-      logEl.textContent = out.trim() || '';
+      if(shotScores.length>0){
+        out = `AVG: ${(total/shotScores.length).toFixed(1)}\n\n` + out;
+      }
+      logEl.textContent = out;
     }
 
     // Utils
     const ema = (prev,next,a)=> prev + (next-prev)*a;
-
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
       if(facingMode==='user') x = 1 - x;
       let px = x * W + calOffX;
       let py = y * H + calOffY;
-      // 增加灵敏度偏移
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
       return {px,py};
     }
-
-    function pushTrail(x,y){
-      if(trail.length===0){ trail.push({x,y}); return; }
-      const last = trail[trail.length-1];
-      if(Math.hypot(x-last.x, y-last.y) < trailMinMove*DPR) return;
-      trail.push({x,y});
-      if(trail.length>trailMax) trail.shift();
-    }
-
     function rmsDist(points){
       if(points.length<2) return 9999;
       const mx = points.reduce((s,p)=>s+p.x,0)/points.length;
@@ -238,34 +218,50 @@
       return Math.sqrt(points.reduce((s,p)=>s+(p.x-mx)**2+(p.y-my)**2,0)/points.length);
     }
 
-    // Draw Functions
+    // Drawing
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
       const half = targetSquareHalf * DPR;
-      // 靶纸底色
+      
+      // 1. 靶纸白底
       ctx.fillStyle = '#fff'; ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
       ctx.strokeStyle = '#000'; ctx.lineWidth = 4 * DPR;
       ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
-      // 黑心
+
+      // 2. 绘制 8.0 环 (黑色实心圆)
+      // 半径由比例尺决定: 7.25mm * PIXELS_PER_MM
+      const r8 = 7.25 * PIXELS_PER_MM;
       ctx.fillStyle = '#000'; ctx.beginPath();
-      ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2); ctx.fill();
+      ctx.arc(cx, cy, r8, 0, Math.PI*2); ctx.fill();
+
+      // 3. 绘制 9.0 环 (辅助白线)
+      // 9.0分 -> r = (10.9-9.0)*2.5 = 4.75mm
+      const r9 = 4.75 * PIXELS_PER_MM;
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1*DPR;
+      ctx.beginPath(); ctx.arc(cx, cy, r9, 0, Math.PI*2); ctx.stroke();
+
+      // 4. 绘制 10.0 环 (关键白线)
+      // 10.0分 -> r = (10.9-10.0)*2.5 = 2.25mm
+      const r10 = 2.25 * PIXELS_PER_MM;
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5*DPR;
+      ctx.beginPath(); ctx.arc(cx, cy, r10, 0, Math.PI*2); ctx.stroke();
+
+      // 5. 绘制靶心点 (10.9分)
+      // 实际上是个点，我们画个极小的中心点示意
+      ctx.fillStyle = '#fff'; ctx.beginPath();
+      ctx.arc(cx, cy, 2*DPR, 0, Math.PI*2); ctx.fill();
     }
 
     function drawSight(x,y){
-      // 瞄具外圈
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 28*DPR;
+      // 外部瞄具圈
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 20*DPR;
       ctx.beginPath(); ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2); ctx.stroke();
       
-      // 瞄具横杠 (装饰)
-      const rOuter = (sight_outer_r - 14)*DPR; 
-      const barW = 8*DPR;
+      // 准心横杠
+      const barL = 30*DPR; const barH = 6*DPR;
       ctx.fillStyle = '#000';
-      ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW); // 左耳
-      ctx.fillRect(x+rOuter, y-barW/2, 20*DPR, barW); // 右耳
-
-      // 内环 (9环参考环 - 决定计分比例)
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 14*DPR;
-      ctx.beginPath(); ctx.arc(x,y, sight_inner_black_r*DPR, 0, Math.PI*2); ctx.stroke();
+      ctx.fillRect(x-sight_outer_r*DPR-10*DPR, y-barH/2, barL, barH);
+      ctx.fillRect(x+sight_outer_r*DPR+10*DPR-barL, y-barH/2, barL, barH);
     }
 
     function drawTrail(){
@@ -276,65 +272,36 @@
       ctx.stroke();
     }
 
-    function drawGuideOverlay(haveLeft, haveRight, locked){
-      const margin = 28*DPR;
-      const r = {x:margin, y:margin+70*DPR, w:W-2*margin, h:H-(margin*2+190*DPR)};
-      r.h = Math.max(0,r.h);
+    function drawHUD(haveLeft, haveRight, locked){
+      const m = 20*DPR;
+      const r = {x:m, y:m+60*DPR, w:W-2*m, h:H-200*DPR};
       
-      ctx.save();
-      ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 3*DPR;
-      ctx.setLineDash([10*DPR, 10*DPR]); ctx.strokeRect(r.x, r.y, r.w, r.h);
-      ctx.setLineDash([]);
-
-      ctx.fillStyle = 'rgba(0,0,0,0.75)';
-      ctx.font = `${14*DPR}px system-ui,sans-serif`;
-      ctx.textBaseline = 'top';
-      ctx.textAlign = 'left'; ctx.fillText('左侧：右手瞄准', r.x+10, r.y+10);
-      ctx.textAlign = 'right'; ctx.fillText('右侧：左手捏合开枪', r.x+r.w-10, r.y+10);
-
-      let msg = '';
-      if(!haveLeft || !haveRight) msg = '请双手入框（尽量左右分开）';
-      else if(!locked) msg = '双手已识别 ✅ 请将准星对准靶心...';
-      else if(!firstShotDone) msg = '已锁定 ✅ 请捏合左手开第一枪';
-      else msg = 'READY ✅';
-
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.font = `${18*DPR}px system-ui,sans-serif`;
-      const mw = ctx.measureText(msg).width + 36*DPR;
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.fillRect(cx-mw/2, cy-20*DPR, mw, 40*DPR);
-      ctx.fillStyle = '#000'; ctx.fillText(msg, cx, cy);
-      ctx.restore();
-    }
-
-    function render(haveLeft, haveRight){
-      drawTarget();
-      drawTrail();
-
-      const now = Date.now();
-      const fx = (now < freezeUntil && freezeAimX!=null) ? freezeAimX : aimX;
-      const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
-      if(fx!=null) drawSight(fx, fy);
-
-      if(bootState !== BOOT.PLAY) drawGuideOverlay(haveLeft, haveRight, lockFrames>0);
-
-      if(mode === MODE.CAL){
-        ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(0,0,W,H);
-        ctx.fillStyle = '#111'; ctx.textAlign='center';
-        ctx.font = `${18*DPR}px sans-serif`;
-        ctx.fillText('校准中：保持瞄准靶心不动...', cx, cy-16*DPR);
-        ctx.fillText(`稳定进度：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy+18*DPR);
+      if(bootState !== BOOT.PLAY){
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 2*DPR;
+        ctx.setLineDash([8*DPR,8*DPR]); ctx.strokeRect(r.x,r.y,r.w,r.h);
+        ctx.setLineDash([]);
+        
+        ctx.fillStyle='rgba(0,0,0,0.8)'; ctx.font=`${14*DPR}px sans-serif`;
+        ctx.textAlign='left'; ctx.fillText('左手:捏合', r.x+10, r.y+20);
+        ctx.textAlign='right'; ctx.fillText('右手:瞄准', r.x+r.w-10, r.y+20);
+        
+        let txt = '';
+        if(!haveLeft||!haveRight) txt='请双手入框';
+        else if(!locked) txt='请瞄准靶心...';
+        else if(!firstShotDone) txt='已锁定: 捏合左手';
+        
+        ctx.textAlign='center'; ctx.font=`${18*DPR}px sans-serif`;
+        ctx.fillText(txt, cx, cy+140*DPR);
+        ctx.restore();
       }
-    }
 
-    function beep(){
-      try{
-        const ac = new (window.AudioContext||window.webkitAudioContext)();
-        const o = ac.createOscillator(); const g = ac.createGain();
-        o.type='square'; o.frequency.value=880; g.gain.value=0.06;
-        o.connect(g); g.connect(ac.destination);
-        o.start(); setTimeout(()=>{o.stop();ac.close()},70);
-      }catch{}
+      if(mode===MODE.CAL){
+        ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fillRect(0,0,W,H);
+        ctx.fillStyle='#000'; ctx.textAlign='center'; ctx.font=`${18*DPR}px sans-serif`;
+        ctx.fillText('保持瞄准靶心不动...', cx, cy-20*DPR);
+        ctx.fillText(`${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy+20*DPR);
+      }
     }
 
     function fire(){
@@ -343,7 +310,7 @@
       if(aimX==null) return;
 
       const dpx = Math.hypot(aimX-cx, aimY-cy);
-      const score = scoreFromDist(dpx); // 使用ISSF标准算法
+      const score = scoreFromDist(dpx);
       shotScores.push(score);
       renderScores();
 
@@ -353,168 +320,116 @@
       trail = [];
       
       flashEl.style.opacity='1'; setTimeout(()=>flashEl.style.opacity='0',80);
-      beep();
+      
+      // 简单Beep
+      try{
+        const ac=new(window.AudioContext||window.webkitAudioContext)();
+        const o=ac.createOscillator();o.frequency.value=600;
+        o.connect(ac.destination);o.start();
+        setTimeout(()=>{o.stop();ac.close()},50);
+      }catch{}
 
       if(!firstShotDone && lockReady){
         firstShotDone = true;
         bootState = BOOT.PLAY;
-        video.style.opacity = '0'; // 隐藏视频
-        video.style.pointerEvents = 'none';
+        video.style.opacity = '0'; video.style.pointerEvents = 'none';
         statusEl.textContent = 'READY ✅';
-        hintEl.textContent = '左手食指拇指捏合=开枪';
+        hintEl.textContent = '黑圆边缘=8分, 内白圈=10分';
       }
     }
 
-    // MediaPipe Hand Logic
-    function getHandIndexByLabel(hdList, label){
-      for(let i=0;i<hdList.length;i++){
-        if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
-      }
-      return -1;
-    }
-
-    function processFrame(leftLm, rightLm){
+    function process(l, r){
       const now = Date.now();
       if(now < freezeUntil) return;
 
-      // 1. 右手 (Right Hand) 控制准星 -> Index Tip (8)
-      const rTip = rightLm[8];
-      const aimP = mapToScreen(rTip.x, rTip.y);
-      
-      if(aimX==null){ aimX=aimP.px; aimY=aimP.py; }
-      else{
-        aimX = ema(aimX, aimP.px, followAlpha);
-        aimY = ema(aimY, aimP.py, followAlpha);
-      }
-      if(mode === MODE.READY && bootState === BOOT.PLAY) pushTrail(aimX, aimY);
-
-      // 2. 左手 (Left Hand) 控制扳机 -> Pinch (Thumb 4, Index 8)
-      // ============================================
-      // ✅ 捏合检测 (Pinch Detection)
-      // ============================================
-      const lThumb = leftLm[4];
-      const lIndex = leftLm[8];
-      const pT = mapToScreen(lThumb.x, lThumb.y);
-      const pI = mapToScreen(lIndex.x, lIndex.y);
-      
-      // 计算屏幕像素距离
-      const pinchDist = Math.hypot(pT.px - pI.px, pT.py - pI.py);
-      
-      // 阈值：捏合 < 35px*DPR, 松开 > 55px*DPR (设置迟滞区间防止误触)
-      const PINCH_THRESH = 35 * DPR;
-      const RELEASE_THRESH = 55 * DPR;
-
-      const allowFire = (mode === MODE.READY) && (bootState === BOOT.PLAY || lockReady);
-
-      if(allowFire){
-        if(pinchDist < PINCH_THRESH){
-          if(!isPinched){
-            // 状态从未捏合变为捏合 -> 触发
-            isPinched = true;
-            fire();
-          }
-        } else if(pinchDist > RELEASE_THRESH){
-          isPinched = false;
-        }
-      } else {
-        isPinched = false;
+      // Aim (Right 8)
+      const aim = mapToScreen(r[8].x, r[8].y);
+      if(aimX==null){ aimX=aim.px; aimY=aim.py; }
+      else{ aimX=ema(aimX,aim.px,followAlpha); aimY=ema(aimY,aim.py,followAlpha); }
+      if(mode===MODE.READY && bootState===BOOT.PLAY) {
+        if(trail.length===0 || Math.hypot(aimX-trail[trail.length-1].x, aimY-trail[trail.length-1].y)>0.5)
+          trail.push({x:aimX, y:aimY});
+        if(trail.length>200) trail.shift();
       }
 
-      // 3. 校准逻辑 (Calibration)
-      if(mode === MODE.CAL){
-        calBuf.push({x:aimP.px, y:aimP.py});
+      // Trigger (Left 4-8 Pinch)
+      const t1=mapToScreen(l[4].x, l[4].y), t2=mapToScreen(l[8].x, l[8].y);
+      const dist = Math.hypot(t1.px-t2.px, t1.py-t2.py);
+      const allow = (mode===MODE.READY) && (bootState===BOOT.PLAY||lockReady);
+      
+      if(allow){
+        if(dist < 35*DPR){ if(!isPinched){ isPinched=true; fire(); } }
+        else if(dist > 50*DPR) isPinched=false;
+      } else isPinched=false;
+
+      // Cal
+      if(mode===MODE.CAL){
+        calBuf.push({x:aim.px, y:aim.py});
         if(calBuf.length>CAL_FRAMES_NEED) calBuf.shift();
-        const rms = rmsDist(calBuf);
-        const stable = (calBuf.length>=8) && (rms <= CAL_STABLE_RMS_PX*DPR);
+        const stable = calBuf.length>=10 && rmsDist(calBuf)<CAL_STABLE_RMS_PX*DPR;
         if(stable) calOkFrames++; else calOkFrames=0;
-
-        if(calOkFrames >= CAL_FRAMES_NEED){
-          calOffX += (cx - aimX); calOffY += (cy - aimY);
-          calOkFrames=0; calBuf=[]; trail=[];
-          mode = MODE.READY;
-          statusEl.textContent = 'READY ✅ 校准完成';
-          btnCal.disabled = false;
+        if(calOkFrames>=CAL_FRAMES_NEED){
+          calOffX+=(cx-aimX); calOffY+=(cy-aimY);
+          mode=MODE.READY; calOkFrames=0; calBuf=[]; trail=[];
+          btnCal.disabled=false;
         }
       }
     }
 
-    function updateBootState(haveLeft, haveRight){
-      if(bootState === BOOT.PLAY) return;
-      if(!haveLeft || !haveRight){
-        bootState = BOOT.NEED_BOTH;
-        lockFrames = 0; lockReady = false;
-        statusEl.textContent = '等待双手...';
-        hintEl.textContent = '左手捏合开火，右手食指瞄准。';
-        return;
-      }
-      if(bootState === BOOT.NEED_BOTH) bootState = BOOT.NEED_LOCK;
+    function loop(l, r){
+      render(l,r);
+      if(l&&r) process(l,r);
       
-      const d = (aimX==null) ? 9999 : Math.hypot(aimX-cx, aimY-cy);
-      const locked = d <= (LOCK_DIST_PX * DPR);
-      if(locked) lockFrames++; else lockFrames=0;
-
-      if(lockFrames >= LOCK_FRAMES_NEED){
-        lockReady = true;
-        statusEl.textContent = '已锁定 ✅ 请捏合左手开第一枪';
-        hintEl.textContent = '第一枪后将隐藏摄像头画面。';
-      } else {
-        lockReady = false;
-        statusEl.textContent = locked ? `锁定中... ${lockFrames}/${LOCK_FRAMES_NEED}` : '请对准靶心';
+      // Lock Logic
+      if(bootState!==BOOT.PLAY){
+        if(!l||!r){ bootState=BOOT.NEED_BOTH; lockFrames=0; lockReady=false; }
+        else if(bootState===BOOT.NEED_BOTH) bootState=BOOT.NEED_LOCK;
+        
+        const d = (aimX==null)?9999:Math.hypot(aimX-cx,aimY-cy);
+        if(d<(LOCK_DIST_PX*DPR)) lockFrames++; else lockFrames=0;
+        
+        lockReady = (lockFrames>=LOCK_FRAMES_NEED);
+        if(lockReady) { statusEl.innerText='已锁定:捏合开火'; hintEl.innerText='READY TO FIRE'; }
+        else statusEl.innerText='请稳定瞄准靶心...';
       }
+    }
+
+    function render(l, r){
+      drawTarget();
+      drawTrail();
+      const now=Date.now();
+      const ax=(now<freezeUntil)?freezeAimX:aimX;
+      const ay=(now<freezeUntil)?freezeAimY:aimY;
+      if(ax!=null) drawSight(ax, ay);
+      drawHUD(l,r,lockReady);
     }
 
     // Init
-    let hands=null, camera=null;
+    let hands, cam;
     async function start(){
-      statusEl.textContent = '请求摄像头...';
-      resize();
-      hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-      hands.setOptions({maxNumHands:2, modelComplexity:1, minDetectionConfidence:0.7, minTrackingConfidence:0.7});
+      statusEl.innerText='启动摄像头...';
+      hands = new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+      hands.setOptions({maxNumHands:2, minDetectionConfidence:0.7, minTrackingConfidence:0.7});
       hands.onResults(res=>{
-        const lm = res.multiHandLandmarks||[];
-        const hd = res.multiHandedness||[];
-        const lIdx = getHandIndexByLabel(hd, 'Left');
-        const rIdx = getHandIndexByLabel(hd, 'Right');
-        const hL = lIdx!==-1 && lm[lIdx], hR = rIdx!==-1 && lm[rIdx];
-
-        if(!hL || !hR){
-          mode = MODE.WAIT_BOTH; isPinched = false;
-          updateBootState(hL,hR); render(hL,hR); return;
-        }
-        if(mode===MODE.WAIT_BOTH) mode=MODE.READY;
-        processFrame(lm[lIdx], lm[rIdx]);
-        updateBootState(hL,hR); render(hL,hR);
+        const lm=res.multiHandLandmarks, hd=res.multiHandedness;
+        if(!lm||!hd){ loop(null,null); return; }
+        const li=hd.findIndex(h=>h.label=='Left'), ri=hd.findIndex(h=>h.label=='Right');
+        loop(li>=0?lm[li]:null, ri>=0?lm[ri]:null);
       });
-
-      video.style.opacity = '1'; video.style.pointerEvents = 'auto';
-      bootState = BOOT.NEED_BOTH; lockFrames=0; lockReady=false; firstShotDone=false;
-      video.style.transform = (facingMode==='user')?'scaleX(-1)':'none';
       
-      camera = new Camera(video, {
-        onFrame: async()=>{ await hands.send({image:video}); },
+      cam = new Camera(video, {
+        onFrame:async()=>{await hands.send({image:video})},
         width:640, height:480, facingMode
       });
-      await camera.start();
+      await cam.start();
+      mode=MODE.READY;
     }
 
-    btnCal.onclick = ()=>{
-      mode = MODE.CAL; calOkFrames=0; calBuf=[]; trail=[]; btnCal.disabled=true;
-      statusEl.textContent = '校准中...';
-    };
-    btnClear.onclick = ()=>{ trail=[]; render(true,true); };
-    btnFlip.onclick = async ()=>{
-      facingMode = (facingMode==='user')?'environment':'user';
-      try{camera&&camera.stop()}catch{}
-      aimX=aimY=null; trail=[]; calOffX=calOffY=0;
-      isPinched=false; bootState=BOOT.NEED_BOTH; firstShotDone=false;
-      video.style.opacity='1'; video.style.pointerEvents='auto';
-      await start();
-    };
+    btnCal.onclick=()=>{mode=MODE.CAL; calOkFrames=0; btnCal.disabled=true;};
+    btnClear.onclick=()=>{trail=[]; shotScores=[]; renderScores();};
+    btnFlip.onclick=()=>{ location.reload(); };
 
-    start().catch(e=>{
-      console.error(e);
-      statusEl.textContent='启动失败: 请检查摄像头权限或HTTPS连接';
-    });
+    start();
   </script>
 </body>
 </html>
