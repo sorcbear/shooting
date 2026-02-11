@@ -7,11 +7,26 @@
   <title>Finger Rifle</title>
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
-    canvas{position:fixed;inset:0;width:100vw;height:100vh;touch-action:none}const sight_bar_
-    video{display:none}
+
+    /* ✅ 先显示摄像头（底层），canvas 叠加在上面 */
+    #video{
+      position:fixed; inset:0;
+      width:100vw; height:100vh;
+      object-fit:cover;
+      transform:scaleX(-1); /* 前置镜像更符合直觉（后面会按 facingMode 切） */
+      z-index:0;
+      background:#000;
+    }
+
+    canvas{
+      position:fixed; inset:0;
+      width:100vw; height:100vh;
+      touch-action:none;
+      z-index:1;
+    }
 
     #hud{
-      position:fixed;left:12px;top:12px;right:12px;
+      position:fixed;left:12px;top:12px;right:12px;z-index:3;
       font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       color:#111;background:rgba(255,255,255,.90);
       border:1px solid #ddd;border-radius:12px;padding:10px 12px;
@@ -30,11 +45,20 @@
     #hud button:disabled{ opacity:.45 }
 
     #log{
-      position:fixed;left:12px;bottom:12px;right:12px;
+      position:fixed;left:12px;bottom:12px;right:12px;z-index:3;
       font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
       color:#111;background:rgba(255,255,255,.90);
       border:1px solid #ddd;border-radius:12px;padding:10px 12px;
-      max-height:36vh;overflow:auto
+      max-height:36vh;overflow:auto;white-space:pre-wrap
+    }
+
+    /* ✅ 闪光“拍照”效果层 */
+    #flash{
+      position:fixed; inset:0; z-index:2;
+      background:#fff;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity 80ms linear;
     }
   </style>
 </head>
@@ -48,11 +72,12 @@
     <button id="btnFlip">切换前/后摄像头</button>
 
     <span class="muted" id="hint">
-      规则：必须同时识别到左右手才开始。校准时让“控准星手指”对准中心小圆点保持不动。
+      规则：必须同时识别到左右手才开始。校准时让“控准星手指”对准中心圆点保持不动。
     </span>
   </div>
 
   <div id="log"></div>
+  <div id="flash"></div>
 
   <video id="video" playsinline></video>
   <canvas id="cv"></canvas>
@@ -67,6 +92,7 @@
     const ctx = canvas.getContext('2d');
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
+    const flashEl = document.getElementById('flash');
     const btnCal = document.getElementById('btnCal');
     const btnClear = document.getElementById('btnClear');
     const btnFlip = document.getElementById('btnFlip');
@@ -86,18 +112,18 @@
     resize();
 
     // Camera
-    let facingMode = 'user';
+    let facingMode = 'user'; // 'user' front, 'environment' back
 
     // States
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
     let mode = MODE.WAIT_BOTH;
 
     // =========================
-    // ✅ 目标靶心：白色正方形 + 中心小圆点（无环线）
+    // 目标靶心：白色正方形 + 中心黑圆点
     // =========================
-    const targetSquareHalf = 80; // 正方形半边长（px）
-    const targetSquareLine = 4;  // 正方形边线粗细（px）
-    const targetDotR = 30;        // 中心小圆点半径（px）
+    const targetSquareHalf = 80; // ✅ 方框大小保持
+    const targetSquareLine = 4;
+    const targetDotR = 30;       // ✅ 你的大圆心
 
     // =========================
     // Sight (GIF-like) - NO inner white ring
@@ -105,21 +131,18 @@
     const sight_outer_r = 120;
     const sight_outer_w = 28;
     const sight_bar_w   = 8;
-    const sight_bar_len = 20;
-    const sight_bar_gap = -2;
+    const sight_bar_len = 20;   // 你现在的短横条
+    const sight_bar_gap = -2;   // 让横条“插进外圈”避免白缝
     const sight_inner_black_r = 44;
     const sight_inner_black_w = 14;
 
     // Trail (blue)
     let trail = [];
-    const trailMax = 220;
+    const trailMax = 260;
     const trailMinMove = 2.5;
-    const trailColor = 'rgba(30,136,229,0.60)';
+    const trailColor = 'rgba(30,136,229,0.65)';
 
-    // =========================
-    // ✅ 准星由“右手食指”控制（改成手指，不用手掌）
-    // 右手 index_tip = 8
-    // =========================
+    // Aim: RIGHT index tip
     let aimX=null, aimY=null;
     const followAlpha = 0.16;
     let sensitivity = 1.00;
@@ -127,10 +150,7 @@
     // Calibration offset
     let calOffX = 0, calOffY = 0;
 
-    // =========================
-    // ✅ 扳机由“左手食指”控制（左右手换一下）
-    // 左手食指从直->弯 触发
-    // =========================
+    // Trigger: LEFT index bend
     const STRAIGHT_DEG = 160;
     const BENT_DEG     = 125;
     const SHOT_COOLDOWN_MS = 450;
@@ -145,15 +165,57 @@
     let calBuf = [];
     let calOkFrames = 0;
 
-    // Log
-    let shots = [];
-    function logShot(s){
-      shots.unshift(s);
-      if(shots.length>12) shots.pop();
-      logEl.innerHTML = shots.map((r,i)=>{
-        const ts = new Date(r.t).toLocaleTimeString();
-        return `${i+1}. ${ts}  hit=${r.hit}  d=${r.d.toFixed(1)}px`;
-      }).join('<br>');
+    // ✅ 第一枪后隐藏摄像头
+    let hasFiredOnce = false;
+
+    // ✅ “定格/拍照”效果：冻结准星一段时间，轨迹清空，再开始下一枪轨迹
+    const FREEZE_MS = 220;
+    let freezeUntil = 0;
+    let freezeAimX = null, freezeAimY = null;
+
+    // =========================
+    // 成绩记录：10.9 满环（每一环宽度等分方框半径）
+    // 用圆形距离来给一个“类似10m靶”的连续环数
+    // =========================
+    function scoreFromDist(dpx){
+      const maxR = targetSquareHalf * DPR;   // 以方框半径作为最大半径
+      if(dpx >= maxR) return 0.0;
+
+      // 10 个等宽 ring：每个 ring 0.9 分刻度
+      const ringW = maxR / 10;
+      const ringIndex = Math.min(9, Math.floor(dpx / ringW)); // 0..9
+      const base = 10 - ringIndex; // 10..1
+      const frac = (dpx - ringIndex * ringW) / ringW; // 0..1
+
+      // ring 内：越靠近内侧分越高：base+0.9 -> base+0.0
+      let s = base + (1 - frac) * 0.9;
+
+      // 中心点：最高 10.9
+      if(ringIndex === 0 && dpx <= 1e-6) s = 10.9;
+
+      // clamp
+      s = Math.max(0, Math.min(10.9, s));
+      // 1 decimal
+      return Math.round(s * 10) / 10;
+    }
+
+    // 记录结构：只显示 “序号, 分数”
+    let shotScores = []; // number[]
+
+    function renderScores(){
+      let out = '';
+      for(let i=0;i<shotScores.length;i++){
+        const idx = i + 1;
+        out += `${idx},  ${shotScores[i].toFixed(1)}\n`;
+
+        // 每 10 发输出一次总环
+        if(idx % 10 === 0){
+          const start = idx - 10;
+          const sum = shotScores.slice(start, idx).reduce((a,b)=>a+b,0);
+          out += `Total(${start+1}-${idx}): ${sum.toFixed(1)}\n\n`;
+        }
+      }
+      logEl.textContent = out.trim() || '';
     }
 
     // Utils
@@ -172,7 +234,10 @@
 
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
-      if(facingMode==='user') x = 1 - x; // mirror for selfie
+
+      // 前置镜像：坐标也镜像
+      if(facingMode==='user') x = 1 - x;
+
       let px = x * W + calOffX;
       let py = y * H + calOffY;
 
@@ -203,27 +268,29 @@
       return Math.sqrt(ms);
     }
 
-    // Draw: target (square + dot)
+    // Draw: target
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
 
-      // white square with black stroke
       const half = targetSquareHalf * DPR;
+
+      // white square (fill)
       ctx.fillStyle = '#fff';
       ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
 
+      // black stroke
       ctx.strokeStyle = '#000';
       ctx.lineWidth = targetSquareLine * DPR;
       ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
 
-      // center small dot
+      // center dot
       ctx.fillStyle = '#000';
       ctx.beginPath();
       ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2);
       ctx.fill();
     }
 
-    // Draw: sight
+    // Draw: sight parts
     function roundRectFill(x,y,w,h,r){
       ctx.beginPath();
       if(ctx.roundRect){
@@ -241,12 +308,14 @@
     }
 
     function drawSight(x,y){
+      // outer ring
       ctx.strokeStyle = '#000';
       ctx.lineWidth = sight_outer_w*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
       ctx.stroke();
 
+      // bars (connect seamlessly)
       const outerInner = (sight_outer_r - sight_outer_w/2)*DPR;
       const barW = sight_bar_w*DPR;
       const barLen = sight_bar_len*DPR;
@@ -263,6 +332,7 @@
       x1 = x2 - barLen;
       roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
 
+      // inner black ring
       ctx.strokeStyle = '#000';
       ctx.lineWidth = sight_inner_black_w*DPR;
       ctx.beginPath();
@@ -270,7 +340,6 @@
       ctx.stroke();
     }
 
-    // Draw: trail
     function drawTrail(){
       if(trail.length<2) return;
       ctx.lineWidth = 3*DPR;
@@ -283,10 +352,17 @@
 
     function render(){
       drawTarget();
-      drawTrail();
-      if(aimX!=null) drawSight(aimX, aimY);
 
-      // overlay hints when not READY
+      // freeze 时：轨迹已经清空，只画准星（定格） + 不更新
+      drawTrail();
+
+      const now = Date.now();
+      if(now < freezeUntil && freezeAimX != null){
+        drawSight(freezeAimX, freezeAimY);
+      }else{
+        if(aimX!=null) drawSight(aimX, aimY);
+      }
+
       if(mode !== MODE.READY){
         ctx.fillStyle = 'rgba(255,255,255,0.75)';
         ctx.fillRect(0,0,W,H);
@@ -297,26 +373,64 @@
         if(mode === MODE.WAIT_BOTH){
           ctx.fillText('请同时出示左右手（右手食指控准星，左手食指扳机）', cx, cy);
         }else if(mode === MODE.CAL){
-          ctx.fillText('校准中：保持双手出现，让“控准星手指”对准中心小圆点并保持不动…', cx, cy - 16*DPR);
+          ctx.fillText('校准中：保持双手出现，让“控准星手指”对准中心圆点并保持不动…', cx, cy - 16*DPR);
           ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
           ctx.fillText(`稳定帧：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy + 18*DPR);
         }
       }
     }
 
-    // ===== Hit test instead of rings =====
-    // Define a small "hit radius" around center dot for logging
-    const HIT_RADIUS_PX = 30; // 你想更严格就调小，比如 18
+    // ✅ 声音：轻微“咔/滴”声（无需音频文件）
+    function beep(){
+      try{
+        const AC = window.AudioContext || window.webkitAudioContext;
+        const ac = new AC();
+        const o = ac.createOscillator();
+        const g = ac.createGain();
+        o.type = 'square';
+        o.frequency.value = 880;
+        g.gain.value = 0.06;
+        o.connect(g); g.connect(ac.destination);
+        o.start();
+        setTimeout(()=>{ o.stop(); ac.close(); }, 70);
+      }catch{}
+    }
+
+    // ✅ 闪光：拍照定格
+    function flash(){
+      flashEl.style.opacity = '1';
+      setTimeout(()=>{ flashEl.style.opacity = '0'; }, 80);
+    }
+
     function fire(){
       const now = Date.now();
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
       if(aimX==null) return;
 
+      // 第一枪后隐藏摄像头画面
+      if(!hasFiredOnce){
+        hasFiredOnce = true;
+        video.style.display = 'none';
+      }
+
+      // 记录分数（10.9满环）
       const d = Math.hypot(aimX-cx, aimY-cy);
-      const hit = d <= HIT_RADIUS_PX * DPR ? 'CENTER' : 'MISS';
+      const score = scoreFromDist(d);
+      shotScores.push(score);
+      renderScores();
 
       lastShotTs = now;
-      logShot({t: now, hit, d});
+
+      // ✅ 定格：冻结准星 + 清轨迹 + 视觉/声音反馈
+      freezeAimX = aimX;
+      freezeAimY = aimY;
+      freezeUntil = now + FREEZE_MS;
+
+      // 扣扳机瞬间：蓝线消失（清空）
+      trail = [];
+
+      flash();
+      beep();
     }
 
     // MediaPipe: find Left/Right hands
@@ -330,8 +444,15 @@
 
     // Main per-frame
     function processFrame(leftLm, rightLm){
-      // ✅ RIGHT index controls aim
-      const rightTip = rightLm[8]; // index_tip
+      const now = Date.now();
+
+      // ✅ freeze 定格期间：不更新准星/轨迹/扳机状态
+      if(now < freezeUntil){
+        return;
+      }
+
+      // RIGHT index controls aim (tip=8)
+      const rightTip = rightLm[8];
       const rightTipP = mapToScreen(rightTip.x, rightTip.y);
 
       if(aimX==null){ aimX = rightTipP.px; aimY = rightTipP.py; }
@@ -344,9 +465,8 @@
         pushTrail(aimX, aimY);
       }
 
-      // ✅ LEFT index controls trigger
+      // LEFT index controls trigger (angle MCP=5, PIP=6, TIP=8)
       const mcp = leftLm[5], pip = leftLm[6], tip = leftLm[8];
-
       const A = mapToScreen(mcp.x, mcp.y);
       const B = mapToScreen(pip.x, pip.y);
       const C = mapToScreen(tip.x, tip.y);
@@ -382,7 +502,6 @@
         else calOkFrames = 0;
 
         if(calOkFrames >= CAL_FRAMES_NEED){
-          // Make aim center
           calOffX += (cx - aimX);
           calOffY += (cy - aimY);
 
@@ -426,11 +545,9 @@
             ? '等待双手…'
             : (!haveLeft ? '缺少左手（Left）' : '缺少右手（Right）');
 
-          // freeze trigger state
           leftWasStraight = false;
           bentFrameCount = 0;
 
-          // if calibrating, reset buffer
           if(mode === MODE.CAL){
             calOkFrames = 0;
             calBuf = [];
@@ -445,12 +562,12 @@
           statusEl.textContent = 'READY ✅（双手已识别）';
         }
 
-        const leftLm  = lmList[leftIdx];
-        const rightLm = lmList[rightIdx];
-
-        processFrame(leftLm, rightLm);
+        processFrame(lmList[leftIdx], lmList[rightIdx]);
         render();
       });
+
+      // video 镜像：前置 user 镜像；后置不镜像
+      video.style.transform = (facingMode==='user') ? 'scaleX(-1)' : 'none';
 
       camera = new Camera(video, {
         onFrame: async ()=>{ await hands.send({image: video}); },
@@ -459,6 +576,11 @@
       });
 
       await camera.start();
+
+      // 初始显示摄像头
+      video.style.display = 'block';
+      hasFiredOnce = false;
+
       statusEl.textContent = '等待双手…';
       mode = MODE.WAIT_BOTH;
       render();
@@ -484,6 +606,7 @@
       facingMode = (facingMode==='user') ? 'environment' : 'user';
       try{ camera && camera.stop(); }catch{}
 
+      // reset runtime
       aimX=aimY=null;
       trail=[];
       calOffX=calOffY=0;
@@ -491,9 +614,18 @@
       bentFrameCount=0;
       mode = MODE.WAIT_BOTH;
 
+      // reset freeze
+      freezeUntil = 0;
+      freezeAimX = freezeAimY = null;
+
+      // reset UI
       calOkFrames=0;
       calBuf=[];
       btnCal.disabled=false;
+
+      // camera should show again until first shot
+      hasFiredOnce = false;
+      video.style.display = 'block';
 
       await start();
     });
