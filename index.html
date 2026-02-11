@@ -300,7 +300,7 @@
 
       // 🔴 红色进枪线 + “略粗一点点”
       ctx.lineWidth = 4*DPR; // 原来 3*DPR -> 4*DPR
-      ctx.strokeStyle = 'rgba(255,0,0)';
+      ctx.strokeStyle = 'rgba(0,0,0)';
       ctx.beginPath();
       ctx.moveTo(trail[0].x, trail[0].y);
       for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
