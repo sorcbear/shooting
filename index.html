@@ -349,16 +349,16 @@
 
     // ✅ 更严格的固定阈值（不用自适应，避免学坏导致误触）
     // 你要“手指完全捏合”：把 ON 拉低，OFF 拉高，迟滞更大
-    const PINCH_ON  = 0.23;  // 越小越要求“完全贴合”
-    const PINCH_OFF = 0.34;  // 松开要明显，防抖
+    const PINCH_ON  = 0.28;  // 越小越要求“完全贴合”
+    const PINCH_OFF = 0.36;  // 松开要明显，防抖
 
     // 连续帧确认：要求“稳定贴合”2-3帧才触发（不会太难，但能砍掉误触）
-    const PINCH_ON_FRAMES  = 3;
+    const PINCH_ON_FRAMES  = 2;
     const PINCH_OFF_FRAMES = 3;
 
     // “闭合速度”门槛：必须是主动捏合而不是抖动碰到（越大越严格）
     // 设为 0 表示不用这个门槛
-    const CLOSE_SPEED_MIN = 0.020;
+    const CLOSE_SPEED_MIN = 0;
 
     let pinchOnCount = 0;
     let pinchOffCount = 0;
