@@ -45,8 +45,6 @@
     #hud b{font-size:15px}
     #hud .muted{color:#666}
     #hud .pill{border:1px solid #111;border-radius:999px;padding:6px 10px;background:#fff;font-weight:800}
-    #hud button{appearance:none;border:1px solid #111;background:#fff;color:#111;padding:8px 10px;border-radius:10px;font-weight:800}
-    #hud button:disabled{opacity:.45}
     #log{
       flex:1 1 auto; min-height:0;
       font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -74,7 +72,6 @@
       <div id="hud">
         <div><b>Finger Rifle</b> <span class="muted">右手食指瞄准 · 左手【捏合】开火</span></div>
         <span id="status" class="pill">初始化…</span>
-        <button id="btnCal">校准准心（需双手）</button>
         <span class="muted" id="hint"></span>
       </div>
       <div id="log"></div>
@@ -94,7 +91,6 @@
     const logEl = document.getElementById('log');
     const flashEl = document.getElementById('flash');
     const hintEl = document.getElementById('hint');
-    const btnCal = document.getElementById('btnCal');
 
     // Canvas size
     let W=0,H=0,DPR=1,cx=0,cy=0;
@@ -106,7 +102,7 @@
       const rect = leftPane.getBoundingClientRect();
       rectW = rect.width;
       rectH = rect.height;
-      shortCss = Math.max(1, Math.min(rectW, rectH)); // 用 CSS px 做“观感归一化”
+      shortCss = Math.max(1, Math.min(rectW, rectH)); // CSS px
 
       W = Math.max(1, Math.floor(rectW * DPR));
       H = Math.max(1, Math.floor(rectH * DPR));
@@ -117,8 +113,6 @@
 
       cx = W/2; cy = H/2;
 
-      // ✅ 让 iPad / 手机抖动观感更接近：按屏幕短边做归一化增益
-      //    同时手机比你当前更敏感一点：对小屏额外加成
       tuneAimByScreen();
     }
     addEventListener('resize', resize);
@@ -127,8 +121,9 @@
     let facingMode = 'user';
 
     // States
-    const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
+    const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY' };
     let mode = MODE.WAIT_BOTH;
+
     const BOOT = { NEED_BOTH:'NEED_BOTH', NEED_LOCK:'NEED_LOCK', PLAY:'PLAY' };
     let bootState = BOOT.NEED_BOTH;
     let firstShotDone = false;
@@ -137,97 +132,74 @@
     // ============================================
     // 靶心/瞄具
     // ============================================
-    const targetSquareHalf = 110;   // 靶纸边长的一半（逻辑像素）
-    const targetDotR = 22;          // 靶心黑点半径（逻辑像素）
-    const sight_outer_r = 120;      // 外圈半径（逻辑像素）
-    const sight_inner_r = 44;       // 内环半径（逻辑像素）
+    const targetSquareHalf = 110;
+    const targetDotR = 22;
+    const sight_outer_r = 120;
+    const sight_inner_r = 44;
 
     // ============================================
-    // Trail
+    // Trail（你要求透明：保持存在但不画）
     // ============================================
     let trail = [];
     const trailMax = 320;
     const trailMinMove = 0.05;
 
     // ============================================
-    // Aim（准星）——会被 tuneAimByScreen() 动态设置
+    // Aim（准星）
     // ============================================
     let aimX=null, aimY=null;
-    let followAlpha = 0.97;   // EMA 跟随系数（越大越敏感/越抖）
-    let sensitivity = 2.4;    // 准星增益（越大越敏感/越抖）
+    let followAlpha = 0.97;
+    let sensitivity = 2.4;
 
-    // ✅ iPad / 手机抖动观感归一化 + 手机更敏感一点
     function tuneAimByScreen(){
-      const REF_SHORT = 390; // 以典型手机短边做参考（CSS px）
-      const isPhoneLike = shortCss < 520; // 简单判定（小屏）
+      const REF_SHORT = 390;
+      const isPhoneLike = shortCss < 520;
 
-      // baseGain：你现在 2.4，手机要更敏感一点 -> 2.7 起步
       const baseGain = 2.7;
-
-      // 归一化：屏幕越大，增益越小（避免 iPad 看起来天然更敏感）
-      // 例如 iPad 短边 768：gain ≈ 2.7*(390/768)=1.37
       let gain = baseGain * (REF_SHORT / shortCss);
-
-      // 手机额外加成（让手机比当前更敏感）
       if(isPhoneLike) gain *= 1.18;
 
-      // 限幅：防止极端尺寸
       sensitivity = Math.min(3.6, Math.max(1.1, gain));
-
-      // EMA：手机更跟手，iPad 稍微滤一点以拉平观感
       followAlpha = isPhoneLike ? 0.985 : 0.965;
     }
 
     // ============================================
-    // Calibration
-    // ============================================
-    let calOffX = 0, calOffY = 0;
-    const CAL_FRAMES_NEED = 20;
-    const CAL_STABLE_RMS_PX = 6;
-    let calBuf = [];
-    let calOkFrames = 0;
-
-    // ============================================
-    // Trigger（A 方案：自适应阈值 + 扳机锁，避免双发）
+    // Trigger（A方案：自适应阈值 + 扳机锁）
     // ============================================
     let isPinched = false;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    // 自适应基线（EMA）
-    let openBaseline = 0.58;   // 张开时 ratio 典型更大
-    let closedBaseline = 0.34; // 捏合时 ratio 典型更小
-
-    // EMA 强度：越大越“跟随当下”，越小越“更稳”
+    let openBaseline = 0.58;
+    let closedBaseline = 0.34;
     const BASELINE_EMA = 0.10;
 
-    // 动态阈值系数（在 open/closed 之间插值）
-    // ON 越靠近 closed -> 更严格；越靠近 open -> 更容易触发
     const ON_POS  = 0.18;
     const OFF_POS = 0.55;
 
-    // 连续帧确认（不让它难触发：ON 用 1~2 帧，OFF 用 2~3 帧）
     const PINCH_ON_FRAMES  = 2;
     const PINCH_OFF_FRAMES = 3;
 
     let pinchOnCount = 0;
     let pinchOffCount = 0;
 
-    // 扳机锁：开火后必须“明确松开”才允许下一枪（根治双发）
     let triggerLocked = false;
+
+    // 防“没捏合就触发”的安全裕量
+    const ON_MARGIN = 0.03;
 
     // Freeze
     const FREEZE_MS = 220;
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
-    // Lock（第一枪前锁定）
+    // Lock
     const LOCK_DIST_PX = 38;
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
 
     // ============================================
-    // ✅ 线性计分（中心=10.9；黑点边缘触碰内环=6.0；更远线性到0）
+    // 计分
     // ============================================
     const CENTER_SCORE = 10.9;
     const TOUCH_SCORE  = 6.0;
@@ -235,38 +207,30 @@
     function scoreFromAimPos(aimX_px, aimY_px){
       const d = Math.hypot(aimX_px - cx, aimY_px - cy);
 
-      const Rb  = targetDotR * DPR;       // 黑点半径(px)
-      const Rin = sight_inner_r * DPR;    // 内环半径(px)
+      const Rb  = targetDotR * DPR;
+      const Rin = sight_inner_r * DPR;
 
-      // 黑点边缘内侧相切内环：d + Rb = Rin
       const d_ref = Math.max(1e-6, Rin - Rb);
-
-      // 线性斜率：到 d_ref 时下降 (CENTER_SCORE - TOUCH_SCORE)
       const dropAtRef = (CENTER_SCORE - TOUCH_SCORE);
-      const constant = d_ref / dropAtRef; // score = 10.9 - d/constant
+      const constant = d_ref / dropAtRef;
 
       let score = CENTER_SCORE - (d / constant);
       score = Math.max(0, Math.min(CENTER_SCORE, score));
       return Math.round(score * 10) / 10;
     }
 
-    // Scores
+    // Scores（倒序：最新在最上面）
     let shotScores = [];
     function renderScores(){
       let out = '';
-      for(let i=0;i<shotScores.length;i++){
+      for(let i=shotScores.length-1;i>=0;i--){
         const idx = i+1;
         out += `${idx}.  ${shotScores[i].toFixed(1)}\n`;
-        if(idx % 10 === 0){
-          const start = idx - 10;
-          const sum = shotScores.slice(start, idx).reduce((a,b)=>a+b,0);
-          out += `Total(${start+1}-${idx}): ${sum.toFixed(1)}\n\n`;
-        }
       }
       logEl.textContent = out.trim() || '';
 
-      // ✅ 超出可视区域：自动滚到底
-      logEl.scrollTop = logEl.scrollHeight;
+      // ✅ 倒序显示：滚到顶部看最新
+      logEl.scrollTop = 0;
     }
 
     // Utils
@@ -276,10 +240,9 @@
       let x = nx, y = ny;
       if(facingMode==='user') x = 1 - x;
 
-      let px = x * W + calOffX;
-      let py = y * H + calOffY;
+      let px = x * W;
+      let py = y * H;
 
-      // 灵敏度（增益）
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
 
@@ -292,13 +255,6 @@
       if(Math.hypot(x-last.x, y-last.y) < trailMinMove*DPR) return;
       trail.push({x,y});
       if(trail.length>trailMax) trail.shift();
-    }
-
-    function rmsDist(points){
-      if(points.length<2) return 9999;
-      const mx = points.reduce((s,p)=>s+p.x,0)/points.length;
-      const my = points.reduce((s,p)=>s+p.y,0)/points.length;
-      return Math.sqrt(points.reduce((s,p)=>s+(p.x-mx)**2+(p.y-my)**2,0)/points.length);
     }
 
     // Draw
@@ -320,21 +276,18 @@
     }
 
     function drawSight(x,y){
-      // 外圈
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 28*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
       ctx.stroke();
 
-      // “耳朵”装饰
       const rOuter = (sight_outer_r - 14)*DPR;
       const barW = 8*DPR;
       ctx.fillStyle = '#000';
       ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW);
       ctx.fillRect(x+rOuter,        y-barW/2, 20*DPR, barW);
 
-      // 内环
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 14*DPR;
       ctx.beginPath();
@@ -343,15 +296,8 @@
     }
 
     function drawTrail(){
-      if(trail.length<2) return;
-
-      // 🔴 纯红、不透明
-      ctx.lineWidth = 4*DPR;
-      ctx.strokeStyle = 'rgb(255,0,0,0)';
-      ctx.beginPath();
-      ctx.moveTo(trail[0].x, trail[0].y);
-      for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
-      ctx.stroke();
+      // 你要求：不要红色进枪线 -> 透明（直接不画）
+      return;
     }
 
     function drawGuideOverlay(haveLeft, haveRight, locked){
@@ -402,16 +348,6 @@
       if(fx!=null) drawSight(fx, fy);
 
       if(bootState !== BOOT.PLAY) drawGuideOverlay(haveLeft, haveRight, lockFrames>0);
-
-      if(mode === MODE.CAL){
-        ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.fillRect(0,0,W,H);
-        ctx.fillStyle = '#111';
-        ctx.textAlign='center';
-        ctx.font = `${18*DPR}px sans-serif`;
-        ctx.fillText('校准中：保持瞄准靶心不动...', cx, cy-16*DPR);
-        ctx.fillText(`稳定进度：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy+18*DPR);
-      }
     }
 
     function beep(){
@@ -468,7 +404,7 @@
       const now = Date.now();
       if(now < freezeUntil) return;
 
-      // 1) 右手：准星 -> index tip(8)
+      // 1) 右手：准星
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
@@ -480,10 +416,9 @@
 
       if(mode === MODE.READY && bootState === BOOT.PLAY) pushTrail(aimX, aimY);
 
-      // 2) 左手：A 方案（自适应阈值）
-      //    ratio = pinch距离 / 手掌尺度（更稳：用 wrist(0) <-> index_mcp(5)）
-      const lThumb = leftLm[4]; // thumb tip
-      const lIndex = leftLm[8]; // index tip
+      // 2) 左手：A方案（自适应阈值 + 基线门槛更新）
+      const lThumb = leftLm[4];
+      const lIndex = leftLm[8];
       const wrist  = leftLm[0];
       const iMcp   = leftLm[5];
 
@@ -491,20 +426,7 @@
       const palmS  = Math.max(1e-6, Math.hypot(wrist.x - iMcp.x, wrist.y - iMcp.y));
       const ratio  = pinchD / palmS;
 
-      // 更新基线：未捏合时更新 open，捏合时更新 closed
-// 先算出 PINCH_ON / PINCH_OFF 之后再更新基线（所以这段要放在阈值计算后面）
-      if(!isPinched){
-        if(ratio > PINCH_OFF){ // ✅ 只有“确实松开”才更新 open
-          openBaseline = ema(openBaseline, ratio, BASELINE_EMA);
-        }
-      }else{
-        if(ratio < PINCH_ON){  // ✅ 只有“确实捏合”才更新 closed
-    closedBaseline = ema(closedBaseline, ratio, BASELINE_EMA);
-        }
-      }
-
-
-      // 保证 open > closed（避免极端抖动导致反转）
+      // 保证 open > closed
       if(openBaseline < closedBaseline + 1e-3){
         const mid = (openBaseline + closedBaseline) / 2;
         openBaseline = mid + 0.01;
@@ -515,11 +437,22 @@
       const PINCH_ON  = closedBaseline + ON_POS  * span;
       const PINCH_OFF = closedBaseline + OFF_POS * span;
 
+      // ✅ 基线更新加门槛：只在“确实松开/确实捏合”时更新，防止“没捏就触发”
+      if(!isPinched){
+        if(ratio > PINCH_OFF){
+          openBaseline = ema(openBaseline, ratio, BASELINE_EMA);
+        }
+      }else{
+        if(ratio < PINCH_ON){
+          closedBaseline = ema(closedBaseline, ratio, BASELINE_EMA);
+        }
+      }
+
       const allowFire = (mode === MODE.READY) && (bootState === BOOT.PLAY || lockReady);
 
       if(allowFire){
-        // 扳机锁：开火后，必须松开（ratio 连续 > OFF）才解锁
         if(triggerLocked){
+          // 必须明确松开才解锁
           if(ratio > PINCH_OFF){
             pinchOffCount++;
             if(pinchOffCount >= PINCH_OFF_FRAMES){
@@ -532,8 +465,7 @@
             pinchOffCount = 0;
           }
         }else{
-          // 正常捏合检测
-          const ON_MARGIN = 0.03; // 0.02~0.05 之间调
+          // 正常检测
           if(ratio < (PINCH_ON - ON_MARGIN)){
             pinchOnCount++;
             pinchOffCount = 0;
@@ -541,24 +473,20 @@
             pinchOffCount++;
             pinchOnCount = 0;
           }else{
-            // 迟滞区：轻微衰减计数，避免“卡边界”
             pinchOnCount = Math.max(0, pinchOnCount - 1);
             pinchOffCount = Math.max(0, pinchOffCount - 1);
           }
 
-          // 触发：从未捏合 -> 捏合成立
           if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
             isPinched = true;
             pinchOnCount = 0;
 
             fire();
 
-            // 开火后立刻锁住，直到明确松开（根治双发）
             triggerLocked = true;
             pinchOffCount = 0;
           }
 
-          // 松开：用于维持 isPinched 状态（即使不用它来允许二次开火，也让基线更新更合理）
           if(isPinched && ratio > PINCH_OFF && pinchOffCount >= PINCH_OFF_FRAMES){
             isPinched = false;
             pinchOffCount = 0;
@@ -568,24 +496,6 @@
         isPinched = false;
         triggerLocked = false;
         pinchOnCount = pinchOffCount = 0;
-      }
-
-      // 3) 校准
-      if(mode === MODE.CAL){
-        calBuf.push({x:aimP.px, y:aimP.py});
-        if(calBuf.length>CAL_FRAMES_NEED) calBuf.shift();
-        const rms = rmsDist(calBuf);
-        const stable = (calBuf.length>=8) && (rms <= CAL_STABLE_RMS_PX*DPR);
-        if(stable) calOkFrames++; else calOkFrames=0;
-
-        if(calOkFrames >= CAL_FRAMES_NEED){
-          calOffX += (cx - aimX);
-          calOffY += (cy - aimY);
-          calOkFrames=0; calBuf=[]; trail=[];
-          mode = MODE.READY;
-          statusEl.textContent = 'READY ✅ 校准完成';
-          btnCal.disabled = false;
-        }
       }
     }
 
@@ -618,6 +528,7 @@
 
     // Init
     let hands=null, camera=null;
+
     async function start(){
       statusEl.textContent = '请求摄像头...';
       resize();
@@ -650,6 +561,7 @@
         }
 
         if(mode===MODE.WAIT_BOTH) mode=MODE.READY;
+
         processFrame(lm[lIdx], lm[rIdx]);
         updateBootState(hL,hR);
         render(hL,hR);
@@ -657,6 +569,7 @@
 
       video.style.opacity = '1';
       video.style.pointerEvents = 'auto';
+
       bootState = BOOT.NEED_BOTH;
       lockFrames=0; lockReady=false; firstShotDone=false;
 
@@ -666,15 +579,9 @@
         onFrame: async()=>{ await hands.send({image:video}); },
         width:640, height:480, facingMode
       });
+
       await camera.start();
     }
-
-    btnCal.onclick = ()=>{
-      mode = MODE.CAL;
-      calOkFrames=0; calBuf=[]; trail=[];
-      btnCal.disabled=true;
-      statusEl.textContent = '校准中...';
-    };
 
     start().catch(e=>{
       console.error(e);
