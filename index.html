@@ -273,34 +273,43 @@
     }
 
     function drawSight(x,y){
-      // 外圈
+      ctx.save();
+
+  // 🔥 关键：叠加模式，不覆盖
+      ctx.globalCompositeOperation = "multiply";
+
+  // 外圈
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 28*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
       ctx.stroke();
 
-      // “耳朵”装饰
+  // “耳朵”
       const rOuter = (sight_outer_r - 14)*DPR;
       const barW = 8*DPR;
       ctx.fillStyle = '#000';
       ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW);
       ctx.fillRect(x+rOuter,        y-barW/2, 20*DPR, barW);
 
-      // 内环
-      ctx.strokeStyle = '#000';
+  // 内环
       ctx.lineWidth = 14*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_inner_r*DPR, 0, Math.PI*2);
       ctx.stroke();
+
+  // 恢复默认
+      ctx.globalCompositeOperation = "source-over";
+      ctx.restore();
     }
+
 
     function drawTrail(){
       if(trail.length<2) return;
 
       // 🔴 红色进枪线 + “略粗一点点”
       ctx.lineWidth = 4*DPR; // 原来 3*DPR -> 4*DPR
-      ctx.strokeStyle = 'rgba(0,0,0)';
+      ctx.strokeStyle = 'rgba(0,0,0,0)';
       ctx.beginPath();
       ctx.moveTo(trail[0].x, trail[0].y);
       for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
