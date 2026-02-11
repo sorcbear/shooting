@@ -17,13 +17,15 @@
       background:#fff;
     }
 
+    /* ✅ 关键：靶区底色白色（摄像头隐藏后，方框外不再黑） */
     #leftPane{
       position:relative;
       flex: 0 0 66.6667%;
       min-height: 0;
-      background:#000;
+      background:#fff;
       overflow:hidden;
     }
+
     #rightPane{
       position:relative;
       flex: 0 0 33.3333%;
@@ -56,7 +58,7 @@
       object-fit:cover;
       transform:scaleX(-1);
       z-index:0;
-      background:#000;
+      background:#000; /* 摄像头底层仍然黑，没问题 */
     }
 
     /* canvas 只覆盖左Pane */
@@ -107,14 +109,12 @@
 
 <body>
   <div id="app">
-    <!-- 左：靶子 + 摄像头 + canvas -->
     <div id="leftPane">
       <video id="video" playsinline></video>
       <canvas id="cv"></canvas>
       <div id="flash"></div>
     </div>
 
-    <!-- 右：HUD + 成绩 -->
     <div id="rightPane">
       <div id="hud">
         <div><b>Finger Rifle</b> <span class="muted">右手食指控准星 · 左手食指扳机</span></div>
@@ -148,9 +148,7 @@
     const btnClear = document.getElementById('btnClear');
     const btnFlip = document.getElementById('btnFlip');
 
-    // =========================
     // Canvas size (以 leftPane 为准)
-    // =========================
     let W=0,H=0,DPR=1,cx=0,cy=0;
     function resize(){
       DPR = Math.max(1, Math.floor(window.devicePixelRatio||1));
@@ -178,36 +176,30 @@
     let firstShotDone = false;
     let lockReady = false;
 
-    // =========================
     // Target
-    // =========================
-    const targetSquareHalf = 110;    // ✅ 稍微放大靶区（更好感知偏移）
+    const targetSquareHalf = 110;   // 方框半边（像素单位基础，再乘DPR）
     const targetSquareLine = 4;
     const targetDotR = 22;
 
-    // =========================
     // Sight
-    // =========================
     const sight_outer_r = 120;
     const sight_outer_w = 28;
     const sight_bar_w   = 8;
     const sight_bar_len = 20;
     const sight_bar_gap = -2;
-    const sight_inner_black_r = 44; // 你提到的“内环”
+    const sight_inner_black_r = 44; // ✅ 你准星的“内环”
     const sight_inner_black_w = 14;
 
-    // Trail（✅ 轻微晃动也画出来）
+    // Trail（轻微晃动也画）
     let trail = [];
     const trailMax = 320;
-    const trailMinMove = 0.35;            // ✅ 更敏感（原来 1.1）
+    const trailMinMove = 0.35;
     const trailColor = 'rgba(30,136,229,0.70)';
 
-    // =========================
-    // ✅ 2) 更敏感：更少平滑 + 更大增益
-    // =========================
+    // ✅ 更敏感：更少平滑 + 更大增益
     let aimX=null, aimY=null;
-    const followAlpha = 0.92;   // ✅ 几乎不“粘滞”，更显抖动
-    let sensitivity = 2.35;     // ✅ 位移放大更明显（原来 1.15~1.55）
+    const followAlpha = 0.92;
+    let sensitivity = 2.35;
 
     // Calibration offset
     let calOffX = 0, calOffY = 0;
@@ -233,8 +225,8 @@
     let freezeAimX = null, freezeAimY = null;
 
     // Lock
-    const LOCK_DIST_PX = 38;        // ✅ 锁定更严格
-    const LOCK_FRAMES_NEED = 24;    // ✅ 更久稳定
+    const LOCK_DIST_PX = 38;
+    const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
 
     // Guide rect
@@ -248,40 +240,40 @@
     }
 
     // =========================
-    // ✅ 3) 更严格计分（解决“全是10+”）
-    // 规则（屏幕标定版）：
-    // - d <= r10: 10.9 -> 10.0（只有很小区域才有 10.x）
-    // - d = innerRefR(瞄准器内环半径): 7.8
-    // - d >= maxR: 0
+    // ✅ ISSF 10m Air Rifle scoring (按你图2~6的逻辑)
+    // 参数（mm）
+    // - 10环直径 0.5mm -> 半径 0.25mm（这里只用于理解，不直接用）
+    // - 每环宽度 2.5mm（径向）
+    // - 黑区外边界 = 7环外圈半径 7.75mm
+    // - 弹丸直径 4.5mm -> 半径 2.25mm
+    //
+    // 关键：触线计高分 => 用有效距离 effective = max(0, d - pelletR)
+    // 电子靶近似：score = 10.9 - effective / 2.5
     // =========================
+    const RING_STEP_MM = 2.5;
+    const PELLET_R_MM  = 2.25;
+    const BLACK_OUTER_R_MM = 7.75; // 7环外圈=黑区外边界
+
+    // 像素->毫米标定：把“准星内环半径(px)”映射为“黑区外边界半径(mm)”
+    function pxToMm(dpx){
+      const refPx = sight_inner_black_r * DPR;
+      return (dpx / Math.max(1, refPx)) * BLACK_OUTER_R_MM;
+    }
+
     function scoreFromDist(dpx){
-      const maxR = targetSquareHalf * DPR;
-      const innerRefR = sight_inner_black_r * DPR; // “瞄准器内环”
-      const r10 = Math.max(6*DPR, targetDotR * DPR * 0.20); // ✅ 10.x 非常窄（关键）
+      const dmm = pxToMm(dpx);
 
-      if(dpx >= maxR) return 0.0;
+      // ✅ 触线计高分：看弹孔外缘 -> 等价于 centerDistance - pelletRadius
+      const effective = Math.max(0, dmm - PELLET_R_MM);
 
-      let score;
+      let score = 10.9 - (effective / RING_STEP_MM);
 
-      if(dpx <= r10){
-        // 10.9 -> 10.0
-        const t = dpx / r10; // 0..1
-        score = 10.9 - 0.9 * t;
-      } else if(dpx <= innerRefR){
-        // 10.0 -> 7.8
-        const t = (dpx - r10) / Math.max(1, (innerRefR - r10));
-        score = 10.0 - (10.0 - 7.8) * t;
-      } else {
-        // 7.8 -> 0 （更严格：用平方衰减让远离中心更快掉分）
-        const t = (dpx - innerRefR) / Math.max(1, (maxR - innerRefR)); // 0..1
-        score = 7.8 * (1 - t*t);
-      }
-
+      // clamp + round 0.1
       score = Math.max(0, Math.min(10.9, score));
       return Math.round(score * 10) / 10;
     }
 
-    // Score list
+    // score list
     let shotScores = [];
     function renderScores(){
       let out = '';
@@ -345,9 +337,11 @@
       return Math.sqrt(ms);
     }
 
-    // Draw
+    // Draw target
     function drawTarget(){
+      // ✅ 不要再出现黑底：清掉后露出 leftPane 的白底即可
       ctx.clearRect(0,0,W,H);
+
       const half = targetSquareHalf * DPR;
 
       ctx.fillStyle = '#fff';
@@ -419,6 +413,7 @@
       ctx.stroke();
     }
 
+    // 引导层
     function drawGuideOverlay(haveLeft, haveRight, locked){
       const r = guideRect();
       ctx.save();
@@ -513,8 +508,8 @@
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
       if(aimX==null) return;
 
-      const d = Math.hypot(aimX-cx, aimY-cy);
-      const score = scoreFromDist(d);
+      const dpx = Math.hypot(aimX-cx, aimY-cy);
+      const score = scoreFromDist(dpx);
       shotScores.push(score);
       renderScores();
 
