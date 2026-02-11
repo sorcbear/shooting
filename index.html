@@ -103,7 +103,7 @@
     // Canvas size
     let W=0,H=0,DPR=1,cx=0,cy=0;
     function resize(){
-      DPR = Math.max(1, Math.floor(window.devicePixelRatio||1));
+      DPR = Math.max(1, window.devicePixelRatio || 1);
       const rect = leftPane.getBoundingClientRect();
       W = Math.max(1, Math.floor(rect.width * DPR));
       H = Math.max(1, Math.floor(rect.height * DPR));
