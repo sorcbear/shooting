@@ -153,12 +153,12 @@
     let calOffX = 0, calOffY = 0;
 
     // Trigger: LEFT index bend（更容易扣动）
-    const STRAIGHT_DEG = 150;   // ✅ 原 160
-    const BENT_DEG     = 145;   // ✅ 原 125（更容易认为“弯了”）
+    const STRAIGHT_DEG = 160;   // ✅ 原 160
+    const BENT_DEG     = 135;   // ✅ 原 125（更容易认为“弯了”）
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
     let leftWasStraight = false;
-    const BENT_FRAMES_NEED = 1; // ✅ 原 3：1帧即可触发
+    const BENT_FRAMES_NEED = 2; // ✅ 原 3：1帧即可触发
     let bentFrameCount = 0;
 
     // Calibration stability
