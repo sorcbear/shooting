@@ -273,36 +273,27 @@
     }
 
     function drawSight(x,y){
-      ctx.save();
-
-  // 🔥 关键：叠加模式，不覆盖
-      ctx.globalCompositeOperation = "multiply";
-
-  // 外圈
+      // 外圈
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 28*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
       ctx.stroke();
 
-  // “耳朵”
+      // “耳朵”装饰
       const rOuter = (sight_outer_r - 14)*DPR;
       const barW = 8*DPR;
       ctx.fillStyle = '#000';
       ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW);
       ctx.fillRect(x+rOuter,        y-barW/2, 20*DPR, barW);
 
-  // 内环
+      // 内环
+      ctx.strokeStyle = '#000';
       ctx.lineWidth = 14*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_inner_r*DPR, 0, Math.PI*2);
       ctx.stroke();
-
-  // 恢复默认
-      ctx.globalCompositeOperation = "source-over";
-      ctx.restore();
     }
-
 
     function drawTrail(){
       if(trail.length<2) return;
