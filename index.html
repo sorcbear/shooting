@@ -9,59 +9,44 @@
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
 
-    /* ✅ 主布局：竖屏上下分；横屏左右分；比例固定 2/3 : 1/3 */
-    #app{
-      position:fixed; inset:0;
-      display:flex;
-      flex-direction:column;
-      background:#fff;
-    }
+    /* 主布局：竖屏上下分；横屏左右分；比例固定 2/3 : 1/3 */
+    #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
 
-    /* ✅ 关键：靶区底色白色（摄像头隐藏后，方框外不再黑） */
+    /* ✅ 靶区底色白色：方框外不再黑 */
     #leftPane{
-      position:relative;
-      flex: 0 0 66.6667%;
-      min-height: 0;
-      background:#fff;
-      overflow:hidden;
+      position:relative; flex:0 0 66.6667%; min-height:0;
+      background:#fff; overflow:hidden;
     }
 
     #rightPane{
-      position:relative;
-      flex: 0 0 33.3333%;
-      min-height: 0;
-      background:#fff;
-      border-top:1px solid #eee;
-      overflow:hidden;
-      display:flex;
-      flex-direction:column;
-      padding:12px;
-      gap:10px;
-      box-sizing:border-box;
+      position:relative; flex:0 0 33.3333%; min-height:0;
+      background:#fff; border-top:1px solid #eee;
+      overflow:hidden; display:flex; flex-direction:column;
+      padding:12px; gap:10px; box-sizing:border-box;
     }
 
     @media (orientation: landscape){
-      #app{ flex-direction:row; }
-      #leftPane{ flex: 0 0 66.6667%; height:100vh; }
+      #app{flex-direction:row;}
+      #leftPane{flex:0 0 66.6667%; height:100vh;}
       #rightPane{
-        flex: 0 0 33.3333%;
-        height:100vh;
-        border-top:none;
-        border-left:1px solid #eee;
+        flex:0 0 33.3333%; height:100vh;
+        border-top:none; border-left:1px solid #eee;
       }
     }
 
-    /* 摄像头只铺满左Pane */
+    /* 摄像头铺满左Pane */
     #video{
       position:absolute; inset:0;
       width:100%; height:100%;
       object-fit:cover;
       transform:scaleX(-1);
       z-index:0;
-      background:#000; /* 摄像头底层仍然黑，没问题 */
+      background:#000;
+      /* ✅ 关键：隐藏时用 opacity，不用 display:none（保证识别稳定） */
+      opacity:1;
+      transition:opacity 120ms linear;
     }
 
-    /* canvas 只覆盖左Pane */
     #cv{
       position:absolute; inset:0;
       width:100%; height:100%;
@@ -69,7 +54,6 @@
       z-index:1;
     }
 
-    /* HUD / Log：右Pane 内部流式布局 */
     #hud{
       font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       color:#111;background:rgba(255,255,255,.96);
@@ -78,19 +62,12 @@
     }
     #hud b{font-size:15px}
     #hud .muted{color:#666}
-    #hud .pill{
-      border:1px solid #111;border-radius:999px;padding:6px 10px;background:#fff;
-      font-weight:800
-    }
-    #hud button{
-      appearance:none;border:1px solid #111;background:#fff;color:#111;
-      padding:8px 10px;border-radius:10px;font-weight:800
-    }
-    #hud button:disabled{ opacity:.45 }
+    #hud .pill{border:1px solid #111;border-radius:999px;padding:6px 10px;background:#fff;font-weight:800}
+    #hud button{appearance:none;border:1px solid #111;background:#fff;color:#111;padding:8px 10px;border-radius:10px;font-weight:800}
+    #hud button:disabled{opacity:.45}
 
     #log{
-      flex: 1 1 auto;
-      min-height:0;
+      flex:1 1 auto; min-height:0;
       font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
       color:#111;background:rgba(255,255,255,.96);
       border:1px solid #ddd;border-radius:12px;padding:10px 12px;
@@ -99,9 +76,7 @@
 
     #flash{
       position:absolute; inset:0; z-index:2;
-      background:#fff;
-      opacity:0;
-      pointer-events:none;
+      background:#fff; opacity:0; pointer-events:none;
       transition:opacity 80ms linear;
     }
   </style>
@@ -177,26 +152,26 @@
     let lockReady = false;
 
     // Target
-    const targetSquareHalf = 110;   // 方框半边（像素单位基础，再乘DPR）
+    const targetSquareHalf = 110;
     const targetSquareLine = 4;
     const targetDotR = 22;
 
-    // Sight
+    // Sight（保持你原来的样式）
     const sight_outer_r = 120;
     const sight_outer_w = 28;
     const sight_bar_w   = 8;
     const sight_bar_len = 20;
     const sight_bar_gap = -2;
-    const sight_inner_black_r = 44; // ✅ 你准星的“内环”
+    const sight_inner_black_r = 44; // “内环”
     const sight_inner_black_w = 14;
 
-    // Trail（轻微晃动也画）
+    // Trail
     let trail = [];
     const trailMax = 320;
     const trailMinMove = 0.35;
     const trailColor = 'rgba(30,136,229,0.70)';
 
-    // ✅ 更敏感：更少平滑 + 更大增益
+    // Aim（灵敏）
     let aimX=null, aimY=null;
     const followAlpha = 0.92;
     let sensitivity = 2.35;
@@ -204,7 +179,7 @@
     // Calibration offset
     let calOffX = 0, calOffY = 0;
 
-    // Trigger (LEFT index bend)
+    // ✅ 扳机参数：完全保持你原始那套
     const STRAIGHT_DEG = 165;
     const BENT_DEG     = 120;
     const SHOT_COOLDOWN_MS = 450;
@@ -240,35 +215,25 @@
     }
 
     // =========================
-    // ✅ ISSF 10m Air Rifle scoring (按你图2~6的逻辑)
-    // 参数（mm）
-    // - 10环直径 0.5mm -> 半径 0.25mm（这里只用于理解，不直接用）
-    // - 每环宽度 2.5mm（径向）
-    // - 黑区外边界 = 7环外圈半径 7.75mm
-    // - 弹丸直径 4.5mm -> 半径 2.25mm
+    // ✅ 新计分：用 ISSF 比例关系在像素域严格对齐
+    // 目标点：d = 内环半径  -> score ≈ 7.8
+    // ISSF：ringStep=2.5mm, pelletR=2.25mm => pelletR/ringStep=0.9
     //
-    // 关键：触线计高分 => 用有效距离 effective = max(0, d - pelletR)
-    // 电子靶近似：score = 10.9 - effective / 2.5
+    // 解：
+    // 10.9 - (d - pelletR)/ringStep = 7.8  (在 d=innerRing 时)
+    // => (innerRing - pelletR)/ringStep = 3.1
+    // 又 pelletR = 0.9*ringStep
+    // => ringStep = innerRing / (3.1 + 0.9) = innerRing/4.0
+    // => pelletR = 0.9*ringStep = innerRing*0.225
     // =========================
-    const RING_STEP_MM = 2.5;
-    const PELLET_R_MM  = 2.25;
-    const BLACK_OUTER_R_MM = 7.75; // 7环外圈=黑区外边界
-
-    // 像素->毫米标定：把“准星内环半径(px)”映射为“黑区外边界半径(mm)”
-    function pxToMm(dpx){
-      const refPx = sight_inner_black_r * DPR;
-      return (dpx / Math.max(1, refPx)) * BLACK_OUTER_R_MM;
-    }
-
     function scoreFromDist(dpx){
-      const dmm = pxToMm(dpx);
+      const innerRingPx = sight_inner_black_r * DPR;
+      const ringStepPx  = innerRingPx / 4.0;
+      const pelletRPx   = ringStepPx * 0.9;
 
-      // ✅ 触线计高分：看弹孔外缘 -> 等价于 centerDistance - pelletRadius
-      const effective = Math.max(0, dmm - PELLET_R_MM);
+      const effectivePx = Math.max(0, dpx - pelletRPx);
+      let score = 10.9 - (effectivePx / ringStepPx);
 
-      let score = 10.9 - (effective / RING_STEP_MM);
-
-      // clamp + round 0.1
       score = Math.max(0, Math.min(10.9, score));
       return Math.round(score * 10) / 10;
     }
@@ -337,11 +302,9 @@
       return Math.sqrt(ms);
     }
 
-    // Draw target
+    // Draw
     function drawTarget(){
-      // ✅ 不要再出现黑底：清掉后露出 leftPane 的白底即可
       ctx.clearRect(0,0,W,H);
-
       const half = targetSquareHalf * DPR;
 
       ctx.fillStyle = '#fff';
@@ -413,7 +376,6 @@
       ctx.stroke();
     }
 
-    // 引导层
     function drawGuideOverlay(haveLeft, haveRight, locked){
       const r = guideRect();
       ctx.save();
@@ -524,10 +486,12 @@
       flash();
       beep();
 
+      // ✅ 隐藏摄像头：改为 opacity，不用 display:none（识别不掉）
       if(!firstShotDone && lockReady){
         firstShotDone = true;
         bootState = BOOT.PLAY;
-        video.style.display = 'none';
+        video.style.opacity = '0';
+        video.style.pointerEvents = 'none';
         statusEl.textContent = 'READY ✅（已开第一枪，进入纯靶子模式）';
         hintEl.textContent = '现在：左手扣动=开枪；每枪会定格并清空轨迹，然后开始下一枪轨迹。';
       }
@@ -559,7 +523,7 @@
         pushTrail(aimX, aimY);
       }
 
-      // LEFT trigger
+      // LEFT trigger（✅ 完全保留你原逻辑）
       const mcp = leftLm[5], pip = leftLm[6], tip = leftLm[8];
       const A = mapToScreen(mcp.x, mcp.y);
       const B = mapToScreen(pip.x, pip.y);
@@ -689,7 +653,10 @@
         render(haveLeft, haveRight);
       });
 
-      video.style.display = 'block';
+      // start/reset
+      video.style.opacity = '1';
+      video.style.pointerEvents = 'auto';
+
       bootState = BOOT.NEED_BOTH;
       lockFrames = 0;
       lockReady = false;
@@ -732,8 +699,6 @@
       facingMode = (facingMode==='user') ? 'environment' : 'user';
       try{ camera && camera.stop(); }catch{}
 
-      resize();
-
       aimX=aimY=null;
       trail=[];
       calOffX=calOffY=0;
@@ -748,7 +713,9 @@
       lockFrames = 0;
       lockReady = false;
       firstShotDone = false;
-      video.style.display = 'block';
+
+      video.style.opacity = '1';
+      video.style.pointerEvents = 'auto';
 
       calOkFrames=0;
       calBuf=[];
