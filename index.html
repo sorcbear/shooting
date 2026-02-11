@@ -127,41 +127,25 @@
     let lockReady = false;
 
     // ============================================
-    // ✅ ISSF 十米气步枪标准计分参数
+    // 靶心/瞄具
     // ============================================
-    
-    // 靶心参数
-    const targetSquareHalf = 110;  // 靶纸边长的一半
-    const targetDotR = 22;          // 靶心黑点半径（像素）
-    
-    // 瞄具参数
-    const sight_outer_r = 120;      // 瞄具外圈半径
-    const sight_inner_r = 44;       // 瞄具内环半径（黑环）
-    
-    // ============================================
-    // ISSF 标准关键事实：
-    // ============================================
-    // - 10环线半径 = 0.25mm
-    // - 7环线半径 = 7.75mm
-    // - 每环宽度 = 2.5mm
-    // - 黑心外边界 = 7环线（这是ISSF标准！）
-    // 
-    // 因此：
-    // - targetDotR（22px）= 7环线半径（7.75mm）
-    // - 从7环到10环跨度 = 7.75mm / 2.5mm = 3.1个环宽
-    // - 每环宽度（像素）= targetDotR / 3.1
-    
-    // 无需单独定义PX_PER_MM，直接用比例公式
+    const targetSquareHalf = 110;   // 靶纸边长的一半（逻辑像素）
+    const targetDotR = 22;          // 靶心黑点半径（逻辑像素）
 
+    const sight_outer_r = 120;      // 外圈半径（逻辑像素）
+    const sight_inner_r = 44;       // 内环半径（逻辑像素）
+
+    // ============================================
     // Trail
+    // ============================================
     let trail = [];
     const trailMax = 320;
     const trailMinMove = 0.35;
-    
-    // Aim (右手)
+
+    // Aim
     let aimX=null, aimY=null;
     const followAlpha = 0.75;
-    let sensitivity = 1.5; // 灵敏度
+    let sensitivity = 1.5;
 
     // Calibration
     let calOffX = 0, calOffY = 0;
@@ -170,11 +154,19 @@
     let calBuf = [];
     let calOkFrames = 0;
 
-    // Trigger (左手 - 捏合)
+    // Trigger (Pinch)
     let isPinched = false;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
-    
+
+    // 更准确捏合：用“归一化捏合比值 + 更长确认帧 + 更大迟滞”
+    const PINCH_ON_RATIO  = 0.26;   // 越小越严格（更难触发）
+    const PINCH_OFF_RATIO = 0.34;   // 迟滞：避免抖动反复触发
+    const PINCH_ON_FRAMES = 3;      // 连续多少帧满足才算捏合
+    const PINCH_OFF_FRAMES= 3;      // 连续多少帧松开才算松开
+    let pinchOnCount = 0;
+    let pinchOffCount = 0;
+
     // Freeze
     const FREEZE_MS = 220;
     let freezeUntil = 0;
@@ -186,34 +178,36 @@
     let lockFrames = 0;
 
     // ============================================
-    // ✅ ISSF 标准计分算法（比例公式）
+    // ✅ 线性计分（触碰内环=6.0；中心=10.9；更远线性到0）
+    // 解释：
+    // - d = 0 -> 10.9
+    // - 当“黑点边缘触碰内环”时：d_ref = Rin - Rb -> score = 6.0
+    // - 超出内环外也继续线性下降，直到 <=0 记为 0.0
     // ============================================
-    // ============================================
-// ✅ ISSF 标准计分算法（保留 10.9 上限，增大距离下滑梯度）
-// ============================================
+    const CENTER_SCORE = 10.9;
+    const TOUCH_SCORE  = 6.0;
 
-// 斜率放大系数：让离中心越远掉分快
-// 经验值：如果你观察到“某个位置原来显示 8.0，现在希望显示 7.0”，用 1.3448
+    function scoreFromAimPos(aimX_px, aimY_px){
+      const d = Math.hypot(aimX_px - cx, aimY_px - cy);
 
-function scoreFromAimPos(aimX_px, aimY_px){
-  const d = Math.hypot(aimX_px - cx, aimY_px - cy);
+      const Rb  = targetDotR * DPR;       // 黑点半径(px)
+      const Rin = sight_inner_r * DPR;    // 内环半径(px)
 
-  const Rb  = targetDotR * DPR;        // 黑点半径(px)
-  const Rin = sight_inner_r * DPR;     // 内环半径(px)
+      // 黑点边缘内侧相切内环：d + Rb = Rin
+      const d_ref = Math.max(1e-6, Rin - Rb);
 
-  const d_ref = Math.max(1e-6, Rin - Rb);   // 黑点边缘触碰内环的中心距
-  const constant = d_ref / 3.9;            // 触碰点约为 7.0 的标定
+      // 线性斜率：到 d_ref 时下降 (CENTER_SCORE - TOUCH_SCORE)
+      const dropAtRef = (CENTER_SCORE - TOUCH_SCORE); // 4.9
+      const constant = d_ref / dropAtRef;             // score = 10.9 - d/constant
 
-  let score = 10.9 - (d / constant);
-  score = Math.max(0, Math.min(10.9, score));
-  return Math.round(score * 10) / 10;      // 保留 0.1
-}
+      let score = CENTER_SCORE - (d / constant);
 
+      // 0~10.9 clamp，并保留 0.1
+      score = Math.max(0, Math.min(CENTER_SCORE, score));
+      return Math.round(score * 10) / 10;
+    }
 
-
-
-
-
+    // Scores
     let shotScores = [];
     function renderScores(){
       let out = '';
@@ -237,9 +231,11 @@ function scoreFromAimPos(aimX_px, aimY_px){
       if(facingMode==='user') x = 1 - x;
       let px = x * W + calOffX;
       let py = y * H + calOffY;
-      // 增加灵敏度偏移
+
+      // 灵敏度（增益）
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
+
       return {px,py};
     }
 
@@ -258,40 +254,55 @@ function scoreFromAimPos(aimX_px, aimY_px){
       return Math.sqrt(points.reduce((s,p)=>s+(p.x-mx)**2+(p.y-my)**2,0)/points.length);
     }
 
-    // Draw Functions
+    // Draw
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
       const half = targetSquareHalf * DPR;
-      // 靶纸底色
-      ctx.fillStyle = '#fff'; ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 4 * DPR;
+
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
+
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 4 * DPR;
       ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
-      // 靶心黑点
-      ctx.fillStyle = '#000'; ctx.beginPath();
-      ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2); ctx.fill();
+
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2);
+      ctx.fill();
     }
 
     function drawSight(x,y){
-      // 瞄具外圈
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 28*DPR;
-      ctx.beginPath(); ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2); ctx.stroke();
-      
-      // 瞄具横杠 (装饰)
-      const rOuter = (sight_outer_r - 14)*DPR; 
+      // 外圈
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 28*DPR;
+      ctx.beginPath();
+      ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
+      ctx.stroke();
+
+      // “耳朵”装饰
+      const rOuter = (sight_outer_r - 14)*DPR;
       const barW = 8*DPR;
       ctx.fillStyle = '#000';
-      ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW); // 左耳
-      ctx.fillRect(x+rOuter, y-barW/2, 20*DPR, barW); // 右耳
+      ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW);
+      ctx.fillRect(x+rOuter,        y-barW/2, 20*DPR, barW);
 
-      // 瞄具内环（计分参考环）
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 14*DPR;
-      ctx.beginPath(); ctx.arc(x,y, sight_inner_r*DPR, 0, Math.PI*2); ctx.stroke();
+      // 内环
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 14*DPR;
+      ctx.beginPath();
+      ctx.arc(x,y, sight_inner_r*DPR, 0, Math.PI*2);
+      ctx.stroke();
     }
 
     function drawTrail(){
       if(trail.length<2) return;
-      ctx.lineWidth = 3*DPR; ctx.strokeStyle = 'rgba(255,0,0,0.70)';
-      ctx.beginPath(); ctx.moveTo(trail[0].x, trail[0].y);
+
+      // 🔴 红色进枪线 + “略粗一点点”
+      ctx.lineWidth = 4*DPR; // 原来 3*DPR -> 4*DPR
+      ctx.strokeStyle = 'rgba(255,0,0,0.70)';
+      ctx.beginPath();
+      ctx.moveTo(trail[0].x, trail[0].y);
       for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
       ctx.stroke();
     }
@@ -300,17 +311,21 @@ function scoreFromAimPos(aimX_px, aimY_px){
       const margin = 28*DPR;
       const r = {x:margin, y:margin+70*DPR, w:W-2*margin, h:H-(margin*2+190*DPR)};
       r.h = Math.max(0,r.h);
-      
+
       ctx.save();
-      ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 3*DPR;
-      ctx.setLineDash([10*DPR, 10*DPR]); ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = 3*DPR;
+      ctx.setLineDash([10*DPR, 10*DPR]);
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.setLineDash([]);
 
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.font = `${14*DPR}px system-ui,sans-serif`;
       ctx.textBaseline = 'top';
-      ctx.textAlign = 'left'; ctx.fillText('左手手掌瞄准', r.x+10, r.y+10);
-      ctx.textAlign = 'right'; ctx.fillText('右手捏合射击', r.x+r.w-10, r.y+10);
+      ctx.textAlign = 'left';
+      ctx.fillText('左手手掌瞄准', r.x+10, r.y+10);
+      ctx.textAlign = 'right';
+      ctx.fillText('右手捏合射击', r.x+r.w-10, r.y+10);
 
       let msg = '';
       if(!haveLeft || !haveRight) msg = '请双手入框（尽量左右分开）';
@@ -318,12 +333,15 @@ function scoreFromAimPos(aimX_px, aimY_px){
       else if(!firstShotDone) msg = '已锁定 ✅ 请捏合左手开第一枪';
       else msg = 'READY ✅';
 
-      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
       ctx.font = `${18*DPR}px system-ui,sans-serif`;
       const mw = ctx.measureText(msg).width + 36*DPR;
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
       ctx.fillRect(cx-mw/2, cy-20*DPR, mw, 40*DPR);
-      ctx.fillStyle = '#000'; ctx.fillText(msg, cx, cy);
+      ctx.fillStyle = '#000';
+      ctx.fillText(msg, cx, cy);
+
       ctx.restore();
     }
 
@@ -339,8 +357,10 @@ function scoreFromAimPos(aimX_px, aimY_px){
       if(bootState !== BOOT.PLAY) drawGuideOverlay(haveLeft, haveRight, lockFrames>0);
 
       if(mode === MODE.CAL){
-        ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(0,0,W,H);
-        ctx.fillStyle = '#111'; ctx.textAlign='center';
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.fillRect(0,0,W,H);
+        ctx.fillStyle = '#111';
+        ctx.textAlign='center';
         ctx.font = `${18*DPR}px sans-serif`;
         ctx.fillText('校准中：保持瞄准靶心不动...', cx, cy-16*DPR);
         ctx.fillText(`稳定进度：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy+18*DPR);
@@ -350,10 +370,14 @@ function scoreFromAimPos(aimX_px, aimY_px){
     function beep(){
       try{
         const ac = new (window.AudioContext||window.webkitAudioContext)();
-        const o = ac.createOscillator(); const g = ac.createGain();
-        o.type='square'; o.frequency.value=880; g.gain.value=0.06;
+        const o = ac.createOscillator();
+        const g = ac.createGain();
+        o.type='square';
+        o.frequency.value=880;
+        g.gain.value=0.06;
         o.connect(g); g.connect(ac.destination);
-        o.start(); setTimeout(()=>{o.stop();ac.close()},70);
+        o.start();
+        setTimeout(()=>{o.stop();ac.close()},70);
       }catch{}
     }
 
@@ -362,7 +386,7 @@ function scoreFromAimPos(aimX_px, aimY_px){
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
       if(aimX==null) return;
 
-      const score = scoreFromAimPos(aimX, aimY); // 使用新的光感枪算法
+      const score = scoreFromAimPos(aimX, aimY);
       shotScores.push(score);
       renderScores();
 
@@ -370,21 +394,22 @@ function scoreFromAimPos(aimX_px, aimY_px){
       freezeAimX = aimX; freezeAimY = aimY;
       freezeUntil = now + FREEZE_MS;
       trail = [];
-      
-      flashEl.style.opacity='1'; setTimeout(()=>flashEl.style.opacity='0',80);
+
+      flashEl.style.opacity='1';
+      setTimeout(()=>flashEl.style.opacity='0',80);
       beep();
 
       if(!firstShotDone && lockReady){
         firstShotDone = true;
         bootState = BOOT.PLAY;
-        video.style.opacity = '0'; // 隐藏视频
+        video.style.opacity = '0';
         video.style.pointerEvents = 'none';
         statusEl.textContent = 'READY ✅';
         hintEl.textContent = '左手食指拇指捏合=开枪';
       }
     }
 
-    // MediaPipe Hand Logic
+    // MediaPipe
     function getHandIndexByLabel(hdList, label){
       for(let i=0;i<hdList.length;i++){
         if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
@@ -396,47 +421,59 @@ function scoreFromAimPos(aimX_px, aimY_px){
       const now = Date.now();
       if(now < freezeUntil) return;
 
-      // 1. 右手 (Right Hand) 控制准星 -> Index Tip (8)
+      // 1) 右手：准星 -> index tip(8)
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
-      
+
       if(aimX==null){ aimX=aimP.px; aimY=aimP.py; }
       else{
         aimX = ema(aimX, aimP.px, followAlpha);
         aimY = ema(aimY, aimP.py, followAlpha);
       }
+
       if(mode === MODE.READY && bootState === BOOT.PLAY) pushTrail(aimX, aimY);
 
-      // 2. 左手 (Left Hand) 控制扳机 -> Pinch (Thumb 4, Index 8)
+      // 2) 左手：更准确捏合（用“距离/手指长度”的归一化比值）
       const lThumb = leftLm[4];
       const lIndex = leftLm[8];
-      const pT = mapToScreen(lThumb.x, lThumb.y);
-      const pI = mapToScreen(lIndex.x, lIndex.y);
-      
-      // 计算屏幕像素距离
-      const pinchDist = Math.hypot(pT.px - pI.px, pT.py - pI.py);
-      
-      // 阈值：捏合 < 35px*DPR, 松开 > 55px*DPR (设置迟滞区间防止误触)
-      const PINCH_THRESH = 35 * DPR;
-      const RELEASE_THRESH = 55 * DPR;
+      const lMcp   = leftLm[5];   // index MCP
+
+      // ⚠️ 捏合判断不要用 mapToScreen（会受 sensitivity 放大影响），直接用归一化坐标更稳
+      const pinchD = Math.hypot(lThumb.x - lIndex.x, lThumb.y - lIndex.y);
+      const scale  = Math.max(1e-6, Math.hypot(lMcp.x - lIndex.x, lMcp.y - lIndex.y)); // 食指长度量级
+      const ratio  = pinchD / scale;
 
       const allowFire = (mode === MODE.READY) && (bootState === BOOT.PLAY || lockReady);
 
       if(allowFire){
-        if(pinchDist < PINCH_THRESH){
-          if(!isPinched){
-            // 状态从未捏合变为捏合 -> 触发
-            isPinched = true;
-            fire();
-          }
-        } else if(pinchDist > RELEASE_THRESH){
-          isPinched = false;
+        if(ratio < PINCH_ON_RATIO){
+          pinchOnCount++;
+          pinchOffCount = 0;
+        }else if(ratio > PINCH_OFF_RATIO){
+          pinchOffCount++;
+          pinchOnCount = 0;
+        }else{
+          // 在迟滞区间：不改变计数，保持状态
+          pinchOnCount = Math.max(0, pinchOnCount-1);
+          pinchOffCount= Math.max(0, pinchOffCount-1);
         }
-      } else {
+
+        if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
+          isPinched = true;
+          pinchOnCount = 0;
+          fire();
+        }
+
+        if(isPinched && pinchOffCount >= PINCH_OFF_FRAMES){
+          isPinched = false;
+          pinchOffCount = 0;
+        }
+      }else{
         isPinched = false;
+        pinchOnCount = pinchOffCount = 0;
       }
 
-      // 3. 校准逻辑 (Calibration)
+      // 3) 校准
       if(mode === MODE.CAL){
         calBuf.push({x:aimP.px, y:aimP.py});
         if(calBuf.length>CAL_FRAMES_NEED) calBuf.shift();
@@ -445,7 +482,8 @@ function scoreFromAimPos(aimX_px, aimY_px){
         if(stable) calOkFrames++; else calOkFrames=0;
 
         if(calOkFrames >= CAL_FRAMES_NEED){
-          calOffX += (cx - aimX); calOffY += (cy - aimY);
+          calOffX += (cx - aimX);
+          calOffY += (cy - aimY);
           calOkFrames=0; calBuf=[]; trail=[];
           mode = MODE.READY;
           statusEl.textContent = 'READY ✅ 校准完成';
@@ -456,6 +494,7 @@ function scoreFromAimPos(aimX_px, aimY_px){
 
     function updateBootState(haveLeft, haveRight){
       if(bootState === BOOT.PLAY) return;
+
       if(!haveLeft || !haveRight){
         bootState = BOOT.NEED_BOTH;
         lockFrames = 0; lockReady = false;
@@ -463,8 +502,9 @@ function scoreFromAimPos(aimX_px, aimY_px){
         hintEl.textContent = '左手捏合开火，右手食指瞄准。';
         return;
       }
+
       if(bootState === BOOT.NEED_BOTH) bootState = BOOT.NEED_LOCK;
-      
+
       const d = (aimX==null) ? 9999 : Math.hypot(aimX-cx, aimY-cy);
       const locked = d <= (LOCK_DIST_PX * DPR);
       if(locked) lockFrames++; else lockFrames=0;
@@ -484,8 +524,15 @@ function scoreFromAimPos(aimX_px, aimY_px){
     async function start(){
       statusEl.textContent = '请求摄像头...';
       resize();
+
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-      hands.setOptions({maxNumHands:2, modelComplexity:1, minDetectionConfidence:0.7, minTrackingConfidence:0.7});
+      hands.setOptions({
+        maxNumHands:2,
+        modelComplexity:1,
+        minDetectionConfidence:0.7,
+        minTrackingConfidence:0.7
+      });
+
       hands.onResults(res=>{
         const lm = res.multiHandLandmarks||[];
         const hd = res.multiHandedness||[];
@@ -494,18 +541,27 @@ function scoreFromAimPos(aimX_px, aimY_px){
         const hL = lIdx!==-1 && lm[lIdx], hR = rIdx!==-1 && lm[rIdx];
 
         if(!hL || !hR){
-          mode = MODE.WAIT_BOTH; isPinched = false;
-          updateBootState(hL,hR); render(hL,hR); return;
+          mode = MODE.WAIT_BOTH;
+          isPinched = false;
+          pinchOnCount = pinchOffCount = 0;
+          updateBootState(hL,hR);
+          render(hL,hR);
+          return;
         }
+
         if(mode===MODE.WAIT_BOTH) mode=MODE.READY;
         processFrame(lm[lIdx], lm[rIdx]);
-        updateBootState(hL,hR); render(hL,hR);
+        updateBootState(hL,hR);
+        render(hL,hR);
       });
 
-      video.style.opacity = '1'; video.style.pointerEvents = 'auto';
-      bootState = BOOT.NEED_BOTH; lockFrames=0; lockReady=false; firstShotDone=false;
+      video.style.opacity = '1';
+      video.style.pointerEvents = 'auto';
+      bootState = BOOT.NEED_BOTH;
+      lockFrames=0; lockReady=false; firstShotDone=false;
+
       video.style.transform = (facingMode==='user')?'scaleX(-1)':'none';
-      
+
       camera = new Camera(video, {
         onFrame: async()=>{ await hands.send({image:video}); },
         width:640, height:480, facingMode
@@ -514,15 +570,20 @@ function scoreFromAimPos(aimX_px, aimY_px){
     }
 
     btnCal.onclick = ()=>{
-      mode = MODE.CAL; calOkFrames=0; calBuf=[]; trail=[]; btnCal.disabled=true;
+      mode = MODE.CAL;
+      calOkFrames=0; calBuf=[]; trail=[];
+      btnCal.disabled=true;
       statusEl.textContent = '校准中...';
     };
+
     btnClear.onclick = ()=>{ trail=[]; render(true,true); };
+
     btnFlip.onclick = async ()=>{
       facingMode = (facingMode==='user')?'environment':'user';
       try{camera&&camera.stop()}catch{}
       aimX=aimY=null; trail=[]; calOffX=calOffY=0;
-      isPinched=false; bootState=BOOT.NEED_BOTH; firstShotDone=false;
+      isPinched=false; pinchOnCount = pinchOffCount = 0;
+      bootState=BOOT.NEED_BOTH; firstShotDone=false;
       video.style.opacity='1'; video.style.pointerEvents='auto';
       await start();
     };
