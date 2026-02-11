@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="format-detection" content="telephone=no,address=no,email=no">
+  <title>Air Rifle (Finger Aim)</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#fff; overflow:hidden; }
+    canvas { position:fixed; inset:0; width:100vw; height:100vh; touch-action:none; }
+    #hud{
+      position:fixed; left:12px; top:12px;
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color:#111; background:rgba(255,255,255,0.85);
+      padding:10px 12px; border:1px solid #ddd; border-radius:10px;
+      max-width: calc(100vw - 24px);
+    }
+    #btnRow{ margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; }
+    button{
+      appearance:none; border:1px solid #111; background:#fff; color:#111;
+      padding:8px 10px; border-radius:10px; font-weight:600;
+    }
+    .muted{ color:#666; font-weight:500; }
+    video{ display:none; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div><b>Finger Aim</b> <span class="muted">（前置摄像头）</span></div>
+    <div id="status" class="muted">加载模型中…</div>
+    <div id="info" class="muted">提示：把食指伸直对着屏幕，距离约 10–30cm。</div>
+    <div id="btnRow">
+      <button id="btnCal">校准中心</button>
+      <button id="btnClear">清空轨迹</button>
+      <button id="btnFlip">切换前/后摄像头</button>
+    </div>
+    <div class="muted" style="margin-top:6px;">
+      轨迹=进枪路线；准星=食指指尖位置（已平滑）。
+    </div>
+  </div>
+
+  <video id="video" playsinline></video>
+  <canvas id="cv"></canvas>
+
+  <!-- MediaPipe Hands (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('cv');
+    const ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
+
+    const btnCal = document.getElementById('btnCal');
+    const btnClear = document.getElementById('btnClear');
+    const btnFlip = document.getElementById('btnFlip');
+
+    // ====== 画面参数 ======
+    const dotRadius = 14;         // 靶心黑点半径（像素）
+    const crossRadius = 10;       // 准星大小
+    const trailMax = 180;         // 轨迹点数量（越大轨迹越长）
+    const trailStepMin = 2.0;     // 新点最小移动阈值（像素），避免密集抖点
+
+    // ====== 跟随手指的“手感”参数（关键） ======
+    // EMA 平滑：越接近 1 越跟得紧，越小越稳但延迟更大
+    const followAlpha = 0.22;     // 0.15~0.35 之间调
+    // 额外的“灵敏度”（把手指移动映射得更大/更小）
+    let sensitivity = 1.10;       // 0.8~1.5 之间调
+
+    // ====== 摄像头方向 ======
+    let facingMode = 'user'; // 'user' 前置, 'environment' 后置
+
+    // ====== 运行状态 ======
+    let W = 0, H = 0, DPR = 1;
+    let cx = 0, cy = 0;           // 屏幕中心（靶心位置）
+    let aimX = null, aimY = null; // 准星（平滑后）
+    let calOffX = 0, calOffY = 0; // 校准偏移：把“当前手指位置”对齐到靶心
+    let trail = [];
+
+    function resize() {
+      DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+      W = Math.floor(window.innerWidth * DPR);
+      H = Math.floor(window.innerHeight * DPR);
+      canvas.width = W;
+      canvas.height = H;
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+      cx = W / 2;
+      cy = H / 2;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function drawScene() {
+      // 白底
+      ctx.clearRect(0, 0, W, H);
+
+      // 轨迹
+      if (trail.length >= 2) {
+        ctx.lineWidth = 3 * DPR;
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+        ctx.beginPath();
+        ctx.moveTo(trail[0].x, trail[0].y);
+        for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
+        ctx.stroke();
+      }
+
+      // 靶心黑点
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.arc(cx, cy, dotRadius * DPR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 准星
+      if (aimX != null) {
+        ctx.lineWidth = 3 * DPR;
+        ctx.strokeStyle = '#000';
+        // 圆
+        ctx.beginPath();
+        ctx.arc(aimX, aimY, crossRadius * DPR, 0, Math.PI * 2);
+        ctx.stroke();
+        // 十字
+        ctx.beginPath();
+        ctx.moveTo(aimX - 16*DPR, aimY);
+        ctx.lineTo(aimX + 16*DPR, aimY);
+        ctx.moveTo(aimX, aimY - 16*DPR);
+        ctx.lineTo(aimX, aimY + 16*DPR);
+        ctx.stroke();
+      }
+    }
+
+    // 将 MediaPipe 归一化坐标 (0~1) 映射到屏幕像素
+    // 前置摄像头需要左右镜像更符合直觉
+    function mapToScreen(nx, ny) {
+      let x = nx, y = ny;
+      if (facingMode === 'user') x = 1 - x; // 镜像
+      let px = x * W;
+      let py = y * H;
+      // 应用校准偏移（把“当前手指”对齐到靶心）
+      px += calOffX;
+      py += calOffY;
+      // 灵敏度：相对靶心放大/缩小
+      px = cx + (px - cx) * sensitivity;
+      py = cy + (py - cy) * sensitivity;
+      // 限制到画布内
+      px = Math.max(0, Math.min(W, px));
+      py = Math.max(0, Math.min(H, py));
+      return {px, py};
+    }
+
+    function ema(prev, next, alpha) {
+      return prev + (next - prev) * alpha;
+    }
+
+    function pushTrail(x, y) {
+      if (trail.length === 0) {
+        trail.push({x, y});
+        return;
+      }
+      const last = trail[trail.length - 1];
+      const dx = x - last.x, dy = y - last.y;
+      if (Math.hypot(dx, dy) < trailStepMin * DPR) return;
+      trail.push({x, y});
+      if (trail.length > trailMax) trail.shift();
+    }
+
+    // ====== MediaPipe Hands ======
+    let hands = null;
+    let camera = null;
+
+    async function start() {
+      statusEl.textContent = '请求摄像头权限…';
+
+      hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+      });
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6,
+      });
+
+      hands.onResults((results) => {
+        const lm = results.multiHandLandmarks?.[0];
+        if (!lm) {
+          statusEl.textContent = '未检测到手（把食指伸直，手进入画面中央）';
+          drawScene();
+          return;
+        }
+        statusEl.textContent = '检测到手 ✅（移动食指指尖进行瞄准）';
+
+        // 食指指尖 landmark = 8
+        const tip = lm[8];
+        const {px, py} = mapToScreen(tip.x, tip.y);
+
+        if (aimX == null) {
+          aimX = px; aimY = py;
+        } else {
+          aimX = ema(aimX, px, followAlpha);
+          aimY = ema(aimY, py, followAlpha);
+        }
+
+        pushTrail(aimX, aimY);
+        drawScene();
+      });
+
+      // Camera utils
+      camera = new Camera(video, {
+        onFrame: async () => {
+          await hands.send({image: video});
+        },
+        width: 640,
+        height: 480,
+        facingMode,
+      });
+
+      await camera.start();
+      statusEl.textContent = '运行中…';
+      drawScene();
+    }
+
+    btnClear.addEventListener('click', () => {
+      trail = [];
+    });
+
+    btnCal.addEventListener('click', () => {
+      // 将当前 aim 点校准到靶心
+      if (aimX == null) return;
+      calOffX += (cx - aimX);
+      calOffY += (cy - aimY);
+      trail = [];
+    });
+
+    btnFlip.addEventListener('click', async () => {
+      facingMode = (facingMode === 'user') ? 'environment' : 'user';
+      // 重启 camera
+      try {
+        if (camera) camera.stop();
+      } catch {}
+      aimX = aimY = null;
+      trail = [];
+      calOffX = calOffY = 0;
+      await start();
+    });
+
+    // 启动
+    start().catch(err => {
+      console.error(err);
+      statusEl.textContent = '启动失败：请在 https 环境打开，或允许摄像头权限。';
+    });
+  </script>
+</body>
+</html>
