@@ -116,12 +116,8 @@
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
     let mode = MODE.WAIT_BOTH;
 
-    // ✅ 新增：开局引导阶段（摄像头必须显示）
-    const BOOT = {
-      NEED_BOTH: 'NEED_BOTH',    // 等双手
-      NEED_LOCK: 'NEED_LOCK',    // 等准星套住靶心并稳定
-      PLAY: 'PLAY'               // 进入纯靶子模式（隐藏摄像头）
-    };
+    // ✅ 开局引导门槛
+    const BOOT = { NEED_BOTH:'NEED_BOTH', NEED_LOCK:'NEED_LOCK', PLAY:'PLAY' };
     let bootState = BOOT.NEED_BOTH;
 
     // =========================
@@ -142,27 +138,27 @@
     const sight_inner_black_r = 44;
     const sight_inner_black_w = 14;
 
-    // Trail
+    // Trail (更敏感：更容易记录细微抖动)
     let trail = [];
     const trailMax = 260;
-    const trailMinMove = 2.5;
+    const trailMinMove = 1.1; // ✅ 原 2.5：降低=更敏感
     const trailColor = 'rgba(30,136,229,0.65)';
 
-    // Aim: RIGHT index tip
+    // Aim: RIGHT index tip（更敏感：更跟手）
     let aimX=null, aimY=null;
-    const followAlpha = 0.16;
-    let sensitivity = 1.00;
+    const followAlpha = 0.28; // ✅ 原 0.16：增大=更跟手更抖
+    let sensitivity = 1.15;   // ✅ 可选：略放大手指移动
 
     // Calibration offset
     let calOffX = 0, calOffY = 0;
 
-    // Trigger: LEFT index bend
-    const STRAIGHT_DEG = 160;
-    const BENT_DEG     = 125;
+    // Trigger: LEFT index bend（更容易扣动）
+    const STRAIGHT_DEG = 150;   // ✅ 原 160
+    const BENT_DEG     = 145;   // ✅ 原 125（更容易认为“弯了”）
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
     let leftWasStraight = false;
-    const BENT_FRAMES_NEED = 3;
+    const BENT_FRAMES_NEED = 1; // ✅ 原 3：1帧即可触发
     let bentFrameCount = 0;
 
     // Calibration stability
@@ -177,23 +173,21 @@
     let freezeAimX = null, freezeAimY = null;
 
     // =========================
-    // ✅ 开局“套准靶心”门槛（避免太快隐藏摄像头）
-    // 需要满足：距离 <= LOCK_DIST 且连续 LOCK_FRAMES
+    // ✅ 开局“套准靶心”门槛（双手+套住+稳定才隐藏摄像头）
     // =========================
-    const LOCK_DIST_PX = 55;      // 你觉得太严就调大，比如 70；太松就调小，比如 45
-    const LOCK_FRAMES_NEED = 18;  // 需要连续多少帧稳定（越大越不容易误触发）
+    const LOCK_DIST_PX = 55;      // 你要更严格：调小；更宽松：调大
+    const LOCK_FRAMES_NEED = 18;  // 你要更慢更稳：调大
     let lockFrames = 0;
 
     // =========================
-    // ✅ 有效范围框（引导玩家把两只手放在边缘）
-    // 这只是引导，不影响算法
+    // 引导框（仅提示，不遮挡靶子）
     // =========================
-    const guideMargin = 40; // 边缘留白
+    const guideMargin = 40;
     function guideRect(){
       const x = guideMargin * DPR;
-      const y = (guideMargin + 90) * DPR; // 给 HUD 留空间
+      const y = (guideMargin + 90) * DPR;
       const w = W - 2*x;
-      const h = H - y - (guideMargin*DPR + 140*DPR); // 给 log 留空间
+      const h = H - y - (guideMargin*DPR + 140*DPR);
       return {x,y,w:Math.max(0,w),h:Math.max(0,h)};
     }
 
@@ -245,6 +239,7 @@
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
       if(facingMode==='user') x = 1 - x;
+
       let px = x * W + calOffX;
       let py = y * H + calOffY;
 
@@ -349,50 +344,54 @@
       ctx.stroke();
     }
 
-    // ✅ 引导：有效范围框 + 文案
+    // ✅ 引导层：只画框+文字，不遮挡靶子
     function drawGuideOverlay(haveLeft, haveRight, locked){
       const r = guideRect();
+      ctx.save();
 
-      // 外层半透明遮罩
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.fillRect(0,0,W,H);
-
-      // 中间“有效范围”挖空：用 clearRect 达到透视效果
-      ctx.clearRect(r.x, r.y, r.w, r.h);
-
-      // 框线
-      ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+      // 虚线框
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 3*DPR;
       ctx.setLineDash([10*DPR, 10*DPR]);
       ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.setLineDash([]);
 
-      // 角标提示（左右）
+      // 左右提示
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
-      ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
+
+      ctx.textAlign = 'left';
       ctx.fillText('左侧：右手食指控准星', r.x + 10*DPR, r.y + 10*DPR);
+
       ctx.textAlign = 'right';
       ctx.fillText('右侧：左手食指扳机', r.x + r.w - 10*DPR, r.y + 10*DPR);
 
-      // 中央状态
+      // 中央提示文字（浅白底条，保证可读）
+      const msg = (!haveLeft || !haveRight)
+        ? '请把两只手放入框内（尽量分开：一左一右）'
+        : (!locked ? '双手已识别 ✅ 现在把准星套住靶心并稳定…' : `锁定中… ✅`);
+
       ctx.textAlign='center';
       ctx.textBaseline='middle';
       ctx.font = `${18*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
 
-      if(!haveLeft || !haveRight){
-        ctx.fillText('请把两只手放入框内（尽量分开：一左一右）', cx, cy);
-      }else if(!locked){
-        ctx.fillText('双手已识别 ✅ 现在把准星“套住靶心”并稳定…', cx, cy);
-      }else{
-        ctx.fillText('锁定中… ✅', cx, cy);
-      }
+      const padX = 18*DPR, padY = 10*DPR;
+      const mw = ctx.measureText(msg).width;
+      const boxW = mw + padX*2;
+      const boxH = 40*DPR;
+
+      ctx.fillStyle = 'rgba(255,255,255,0.40)';
+      ctx.fillRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
+
+      ctx.fillStyle = 'rgba(0,0,0,0.80)';
+      ctx.fillText(msg, cx, cy);
+
+      ctx.restore();
     }
 
     function render(haveLeft=false, haveRight=false){
       drawTarget();
-
       drawTrail();
 
       const now = Date.now();
@@ -400,16 +399,14 @@
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
 
-      // ✅ 开局引导层：只有 bootState 不是 PLAY 才显示
+      // 引导层（PLAY 之前显示，且不遮靶）
       if(bootState !== BOOT.PLAY){
-        const locked = lockFrames > 0;
-        drawGuideOverlay(haveLeft, haveRight, locked);
+        drawGuideOverlay(haveLeft, haveRight, lockFrames>0);
       }
 
-      // 校准提示仍保留（但它会在 guide overlay 上面显示状态）
+      // 校准提示
       if(mode === MODE.CAL){
-        // 额外显示稳定帧
-        ctx.fillStyle = 'rgba(255,255,255,0.60)';
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
         ctx.fillRect(0,0,W,H);
         ctx.fillStyle = '#111';
         ctx.font = `${18*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
@@ -452,11 +449,11 @@
 
       lastShotTs = now;
 
-      // freeze + clear trail
       freezeAimX = aimX;
       freezeAimY = aimY;
       freezeUntil = now + FREEZE_MS;
-      trail = [];
+
+      trail = []; // 扣扳机瞬间轨迹消失
 
       flash();
       beep();
@@ -470,11 +467,9 @@
       return -1;
     }
 
-    // Main per-frame
+    // 处理一帧（双手已存在时）
     function processFrame(leftLm, rightLm){
       const now = Date.now();
-
-      // freeze期间不更新
       if(now < freezeUntil) return;
 
       // RIGHT tip controls aim
@@ -487,7 +482,7 @@
         aimY = ema(aimY, rightTipP.py, followAlpha);
       }
 
-      // ✅ 只有进入 PLAY 后才记录轨迹（否则引导阶段不画轨迹，避免乱）
+      // 只有 PLAY 后记录轨迹
       if(mode === MODE.READY && bootState === BOOT.PLAY){
         pushTrail(aimX, aimY);
       }
@@ -517,7 +512,7 @@
         bentFrameCount = 0;
       }
 
-      // Calibration: use RIGHT tip stability
+      // Calibration uses RIGHT tip stability
       if(mode === MODE.CAL){
         calBuf.push({x: rightTipP.px, y: rightTipP.py});
         if(calBuf.length > CAL_FRAMES_NEED) calBuf.shift();
@@ -537,12 +532,13 @@
           trail = [];
           mode = MODE.READY;
           statusEl.textContent = 'READY ✅（校准完成）';
+          hintEl.textContent = '继续：把准星套住靶心稳定，进入纯靶子模式。';
           btnCal.disabled = false;
         }
       }
     }
 
-    // ✅ 引导逻辑：双手 + 套住靶心稳定 -> 隐藏摄像头
+    // 引导：双手 + 套住靶心稳定 -> 隐藏摄像头
     function updateBootState(haveLeft, haveRight){
       if(bootState === BOOT.PLAY) return;
 
@@ -550,14 +546,12 @@
         bootState = BOOT.NEED_BOTH;
         lockFrames = 0;
         statusEl.textContent = '等待双手…';
-        hintEl.textContent = '请把两只手放入屏幕“虚线框”内：尽量左右分开。';
+        hintEl.textContent = '请把两只手放进虚线框内：尽量左右分开。';
         return;
       }
 
-      // 有双手
       if(bootState === BOOT.NEED_BOTH) bootState = BOOT.NEED_LOCK;
 
-      // 判断准星是否套住靶心
       const d = (aimX==null) ? 999999 : Math.hypot(aimX - cx, aimY - cy);
       const lockedNow = d <= (LOCK_DIST_PX * DPR);
 
@@ -574,15 +568,9 @@
 
       if(lockFrames >= LOCK_FRAMES_NEED){
         bootState = BOOT.PLAY;
-
-        // ✅ 隐藏摄像头
         video.style.display = 'none';
-
-        // 进入可射击状态
         statusEl.textContent = 'READY ✅（可射击）';
-        hintEl.textContent = '左手食指扣动=开枪；每枪会定格并清空轨迹，然后开始下一枪轨迹。';
-
-        // 清一次轨迹
+        hintEl.textContent = '左手食指稍微扣动=开枪；每枪会定格并清空轨迹，然后开始下一枪轨迹。';
         trail = [];
       }
     }
@@ -611,28 +599,20 @@
         const haveLeft  = leftIdx  !== -1 && lmList[leftIdx];
         const haveRight = rightIdx !== -1 && lmList[rightIdx];
 
-        // mode: ready when both present, but boot gate still controls hiding
         if(!haveLeft || !haveRight){
           mode = MODE.WAIT_BOTH;
           leftWasStraight = false;
           bentFrameCount = 0;
 
-          // 引导状态也跟着更新
           updateBootState(haveLeft, haveRight);
           render(haveLeft, haveRight);
           return;
         }
 
-        if(mode === MODE.WAIT_BOTH){
-          mode = MODE.READY;
-        }
+        if(mode === MODE.WAIT_BOTH) mode = MODE.READY;
 
-        // 更新 aim / trigger / cal
         processFrame(lmList[leftIdx], lmList[rightIdx]);
-
-        // 引导状态：需要用当前 aim 判断锁定
         updateBootState(haveLeft, haveRight);
-
         render(haveLeft, haveRight);
       });
 
@@ -653,7 +633,7 @@
       await camera.start();
 
       statusEl.textContent = '等待双手…';
-      hintEl.textContent = '请把两只手放入屏幕“虚线框”内：尽量左右分开。';
+      hintEl.textContent = '请把两只手放进虚线框内：尽量左右分开。';
       mode = MODE.WAIT_BOTH;
       render(false,false);
     }
@@ -679,7 +659,6 @@
       facingMode = (facingMode==='user') ? 'environment' : 'user';
       try{ camera && camera.stop(); }catch{}
 
-      // reset runtime
       aimX=aimY=null;
       trail=[];
       calOffX=calOffY=0;
@@ -687,16 +666,13 @@
       bentFrameCount=0;
       mode = MODE.WAIT_BOTH;
 
-      // reset freeze
       freezeUntil = 0;
       freezeAimX = freezeAimY = null;
 
-      // reset boot guide
       bootState = BOOT.NEED_BOTH;
       lockFrames = 0;
       video.style.display = 'block';
 
-      // reset cal
       calOkFrames=0;
       calBuf=[];
       btnCal.disabled=false;
