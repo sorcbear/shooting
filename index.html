@@ -9,7 +9,7 @@
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
 
-    /* ✅ 主布局：竖屏默认单列；横屏左右分屏 */
+    /* ✅ 主布局：竖屏上下分；横屏左右分；比例固定 2/3 : 1/3 */
     #app{
       position:fixed; inset:0;
       display:flex;
@@ -19,33 +19,37 @@
 
     #leftPane{
       position:relative;
-      flex: 1 1 auto;
+      flex: 0 0 66.6667%;
       min-height: 0;
-      background:#000; /* 摄像头底色 */
+      background:#000;
       overflow:hidden;
     }
-
     #rightPane{
       position:relative;
-      flex: 0 0 auto;
+      flex: 0 0 33.3333%;
+      min-height: 0;
       background:#fff;
       border-top:1px solid #eee;
       overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      padding:12px;
+      gap:10px;
+      box-sizing:border-box;
     }
 
-    /* 横屏：左靶右成绩 */
     @media (orientation: landscape){
       #app{ flex-direction:row; }
-      #leftPane{ flex: 0 0 50vw; height:100vh; }
+      #leftPane{ flex: 0 0 66.6667%; height:100vh; }
       #rightPane{
-        flex: 1 1 auto;
+        flex: 0 0 33.3333%;
         height:100vh;
         border-top:none;
         border-left:1px solid #eee;
       }
     }
 
-    /* 摄像头底层（只在左Pane里铺满） */
+    /* 摄像头只铺满左Pane */
     #video{
       position:absolute; inset:0;
       width:100%; height:100%;
@@ -63,11 +67,8 @@
       z-index:1;
     }
 
-    /* HUD 放右Pane 上方（竖屏时也在下半部分的顶部） */
+    /* HUD / Log：右Pane 内部流式布局 */
     #hud{
-      position:absolute;
-      left:12px; right:12px; top:12px;
-      z-index:3;
       font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       color:#111;background:rgba(255,255,255,.96);
       border:1px solid #ddd;border-radius:12px;padding:10px 12px;
@@ -85,24 +86,13 @@
     }
     #hud button:disabled{ opacity:.45 }
 
-    /* 成绩区：右Pane 下方滚动 */
     #log{
-      position:absolute;
-      left:12px; right:12px;
-      top: calc(12px + 60px);
-      bottom:12px;
-      z-index:2;
+      flex: 1 1 auto;
+      min-height:0;
       font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
       color:#111;background:rgba(255,255,255,.96);
       border:1px solid #ddd;border-radius:12px;padding:10px 12px;
       overflow:auto;white-space:pre-wrap
-    }
-
-    /* 竖屏：右Pane 高度更小一些（HUD+log在底部区域） */
-    @media (orientation: portrait){
-      #rightPane{ flex: 0 0 38vh; }
-      #log{ top: calc(12px + 78px); }
-      #hud{ padding:10px 12px; }
     }
 
     #flash{
@@ -159,10 +149,9 @@
     const btnFlip = document.getElementById('btnFlip');
 
     // =========================
-    // Canvas size (✅ 现在以 leftPane 为准)
+    // Canvas size (以 leftPane 为准)
     // =========================
     let W=0,H=0,DPR=1,cx=0,cy=0;
-
     function resize(){
       DPR = Math.max(1, Math.floor(window.devicePixelRatio||1));
       const rect = leftPane.getBoundingClientRect();
@@ -179,24 +168,22 @@
     // Camera
     let facingMode = 'user';
 
-    // Game states
+    // States
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
     let mode = MODE.WAIT_BOTH;
 
-    // 开局引导阶段
     const BOOT = { NEED_BOTH:'NEED_BOTH', NEED_LOCK:'NEED_LOCK', PLAY:'PLAY' };
     let bootState = BOOT.NEED_BOTH;
 
-    // 必须“锁定 + 成功击发第一枪”才隐藏摄像头
     let firstShotDone = false;
     let lockReady = false;
 
     // =========================
-    // Target: square + center dot
+    // Target
     // =========================
-    const targetSquareHalf = 80;   // 目标方框半边
+    const targetSquareHalf = 110;    // ✅ 稍微放大靶区（更好感知偏移）
     const targetSquareLine = 4;
-    const targetDotR = 25;
+    const targetDotR = 22;
 
     // =========================
     // Sight
@@ -206,28 +193,26 @@
     const sight_bar_w   = 8;
     const sight_bar_len = 20;
     const sight_bar_gap = -2;
-    const sight_inner_black_r = 44;
+    const sight_inner_black_r = 44; // 你提到的“内环”
     const sight_inner_black_w = 14;
 
-    // Trail
+    // Trail（✅ 轻微晃动也画出来）
     let trail = [];
-    const trailMax = 260;
-    const trailMinMove = 1.1;
-    const trailColor = 'rgba(30,136,229,0.65)';
+    const trailMax = 320;
+    const trailMinMove = 0.35;            // ✅ 更敏感（原来 1.1）
+    const trailColor = 'rgba(30,136,229,0.70)';
 
     // =========================
-    // ✅ 2) 瞄准更严格/更灵敏
+    // ✅ 2) 更敏感：更少平滑 + 更大增益
     // =========================
-    // 你原来 followAlpha=0.28，sensitivity=1.15
-    // 更灵敏=更少滞后(增大followAlpha) + 更大位移放大(增大sensitivity)
     let aimX=null, aimY=null;
-    const followAlpha = 0.52;   // ✅ 更跟手（数值越大越“跟”，也更抖）
-    let sensitivity = 1.55;     // ✅ 更灵敏（晃动会被放大）
+    const followAlpha = 0.92;   // ✅ 几乎不“粘滞”，更显抖动
+    let sensitivity = 2.35;     // ✅ 位移放大更明显（原来 1.15~1.55）
 
     // Calibration offset
     let calOffX = 0, calOffY = 0;
 
-    // Trigger: LEFT index bend
+    // Trigger (LEFT index bend)
     const STRAIGHT_DEG = 165;
     const BENT_DEG     = 120;
     const SHOT_COOLDOWN_MS = 450;
@@ -247,12 +232,12 @@
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
-    // 开局“套准靶心”门槛
-    const LOCK_DIST_PX = 45;          // ✅ 稍微严格一点（原 55）
-    const LOCK_FRAMES_NEED = 22;      // ✅ 稳定更久（原 18）
+    // Lock
+    const LOCK_DIST_PX = 38;        // ✅ 锁定更严格
+    const LOCK_FRAMES_NEED = 24;    // ✅ 更久稳定
     let lockFrames = 0;
 
-    // 引导框（仅提示）
+    // Guide rect
     const guideMargin = 28;
     function guideRect(){
       const x = guideMargin * DPR;
@@ -263,33 +248,40 @@
     }
 
     // =========================
-    // ✅ 3) 更严格计分（并标定：触碰“瞄准器内环”≈7.8）
+    // ✅ 3) 更严格计分（解决“全是10+”）
+    // 规则（屏幕标定版）：
+    // - d <= r10: 10.9 -> 10.0（只有很小区域才有 10.x）
+    // - d = innerRefR(瞄准器内环半径): 7.8
+    // - d >= maxR: 0
     // =========================
-    // 说明：ISSF 10m AR 的精确环值需要真实靶纸尺寸、弹孔直径等；你这里是屏幕靶。
-    // 我按你的要求做“标定”：
-    // - d=0 -> 10.9
-    // - d = (sight_inner_black_r * DPR) -> 7.8
-    // - d >= (targetSquareHalf * DPR) -> 0
-    // 中间采用更陡的线性衰减（比你原来的“分环”明显更严格）
     function scoreFromDist(dpx){
       const maxR = targetSquareHalf * DPR;
-      const innerRefR = sight_inner_black_r * DPR; // 你说的“瞄准器内环”
-      const sCenter = 10.9;
-      const sInner  = 7.8;
+      const innerRefR = sight_inner_black_r * DPR; // “瞄准器内环”
+      const r10 = Math.max(6*DPR, targetDotR * DPR * 0.20); // ✅ 10.x 非常窄（关键）
 
       if(dpx >= maxR) return 0.0;
 
-      // 线性斜率：保证 d=innerRefR 时=7.8
-      const k = (sCenter - sInner) / Math.max(1, innerRefR); // 分/像素
-      let score = sCenter - k * dpx;
+      let score;
 
-      // 超过 maxR 之外直接 0（已经在上面挡了）
+      if(dpx <= r10){
+        // 10.9 -> 10.0
+        const t = dpx / r10; // 0..1
+        score = 10.9 - 0.9 * t;
+      } else if(dpx <= innerRefR){
+        // 10.0 -> 7.8
+        const t = (dpx - r10) / Math.max(1, (innerRefR - r10));
+        score = 10.0 - (10.0 - 7.8) * t;
+      } else {
+        // 7.8 -> 0 （更严格：用平方衰减让远离中心更快掉分）
+        const t = (dpx - innerRefR) / Math.max(1, (maxR - innerRefR)); // 0..1
+        score = 7.8 * (1 - t*t);
+      }
+
       score = Math.max(0, Math.min(10.9, score));
-      // 四舍五入到 0.1
       return Math.round(score * 10) / 10;
     }
 
-    // score list
+    // Score list
     let shotScores = [];
     function renderScores(){
       let out = '';
@@ -319,7 +311,6 @@
       return Math.acos(cos) * 180/Math.PI;
     }
 
-    // ✅ 坐标映射：以 leftPane canvas 为坐标系
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
       if(facingMode==='user') x = 1 - x;
@@ -354,7 +345,7 @@
       return Math.sqrt(ms);
     }
 
-    // Draw target
+    // Draw
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
       const half = targetSquareHalf * DPR;
@@ -428,7 +419,6 @@
       ctx.stroke();
     }
 
-    // 引导层：只画框+文字
     function drawGuideOverlay(haveLeft, haveRight, locked){
       const r = guideRect();
       ctx.save();
@@ -667,8 +657,6 @@
 
     async function start(){
       statusEl.textContent = '请求摄像头权限…';
-
-      // ✅ resize 一次，确保横竖屏/分屏后 W/H 正确
       resize();
 
       hands = new Hands({ locateFile: (f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
@@ -706,14 +694,12 @@
         render(haveLeft, haveRight);
       });
 
-      // show video on start
       video.style.display = 'block';
       bootState = BOOT.NEED_BOTH;
       lockFrames = 0;
       lockReady = false;
       firstShotDone = false;
 
-      // mirror
       video.style.transform = (facingMode==='user') ? 'scaleX(-1)' : 'none';
 
       camera = new Camera(video, {
@@ -751,7 +737,6 @@
       facingMode = (facingMode==='user') ? 'environment' : 'user';
       try{ camera && camera.stop(); }catch{}
 
-      // ✅ 重新布局尺寸（重要：横屏分屏时）
       resize();
 
       aimX=aimY=null;
@@ -777,7 +762,6 @@
       await start();
     });
 
-    // 初始启动
     start().catch(err=>{
       console.error(err);
       statusEl.textContent = '启动失败：请在 https 打开并允许摄像头权限';
