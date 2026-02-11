@@ -116,9 +116,13 @@
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
     let mode = MODE.WAIT_BOTH;
 
-    // ✅ 开局引导门槛
+    // 开局引导阶段
     const BOOT = { NEED_BOTH:'NEED_BOTH', NEED_LOCK:'NEED_LOCK', PLAY:'PLAY' };
     let bootState = BOOT.NEED_BOTH;
+
+    // ✅ 新增：必须“锁定 + 成功击发第一枪”才隐藏摄像头
+    let firstShotDone = false;
+    let lockReady = false;
 
     // =========================
     // Target: square + center dot
@@ -138,27 +142,27 @@
     const sight_inner_black_r = 44;
     const sight_inner_black_w = 14;
 
-    // Trail (更敏感：更容易记录细微抖动)
+    // Trail（较敏感）
     let trail = [];
     const trailMax = 260;
-    const trailMinMove = 1.1; // ✅ 原 2.5：降低=更敏感
+    const trailMinMove = 1.1;
     const trailColor = 'rgba(30,136,229,0.65)';
 
-    // Aim: RIGHT index tip（更敏感：更跟手）
+    // Aim: RIGHT index tip（较跟手）
     let aimX=null, aimY=null;
-    const followAlpha = 0.28; // ✅ 原 0.16：增大=更跟手更抖
-    let sensitivity = 1.15;   // ✅ 可选：略放大手指移动
+    const followAlpha = 0.28;
+    let sensitivity = 1.15;
 
     // Calibration offset
     let calOffX = 0, calOffY = 0;
 
-    // Trigger: LEFT index bend（更容易扣动）
-    const STRAIGHT_DEG = 160;   // ✅ 原 160
-    const BENT_DEG     = 135;   // ✅ 原 125（更容易认为“弯了”）
+    // Trigger: LEFT index bend（你指定的参数）
+    const STRAIGHT_DEG = 160;
+    const BENT_DEG     = 130;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
     let leftWasStraight = false;
-    const BENT_FRAMES_NEED = 2; // ✅ 原 3：1帧即可触发
+    const BENT_FRAMES_NEED = 2;
     let bentFrameCount = 0;
 
     // Calibration stability
@@ -172,16 +176,12 @@
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
-    // =========================
-    // ✅ 开局“套准靶心”门槛（双手+套住+稳定才隐藏摄像头）
-    // =========================
-    const LOCK_DIST_PX = 55;      // 你要更严格：调小；更宽松：调大
-    const LOCK_FRAMES_NEED = 18;  // 你要更慢更稳：调大
+    // ✅ 开局“套准靶心”门槛
+    const LOCK_DIST_PX = 55;
+    const LOCK_FRAMES_NEED = 18;
     let lockFrames = 0;
 
-    // =========================
-    // 引导框（仅提示，不遮挡靶子）
-    // =========================
+    // 引导框（仅提示）
     const guideMargin = 40;
     function guideRect(){
       const x = guideMargin * DPR;
@@ -344,19 +344,17 @@
       ctx.stroke();
     }
 
-    // ✅ 引导层：只画框+文字，不遮挡靶子
+    // 引导层：只画框+文字，不遮挡靶子
     function drawGuideOverlay(haveLeft, haveRight, locked){
       const r = guideRect();
       ctx.save();
 
-      // 虚线框
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 3*DPR;
       ctx.setLineDash([10*DPR, 10*DPR]);
       ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.setLineDash([]);
 
-      // 左右提示
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
       ctx.textBaseline = 'top';
@@ -367,16 +365,17 @@
       ctx.textAlign = 'right';
       ctx.fillText('右侧：左手食指扳机', r.x + r.w - 10*DPR, r.y + 10*DPR);
 
-      // 中央提示文字（浅白底条，保证可读）
-      const msg = (!haveLeft || !haveRight)
-        ? '请把两只手放入框内（尽量分开：一左一右）'
-        : (!locked ? '双手已识别 ✅ 现在把准星套住靶心并稳定…' : `锁定中… ✅`);
+      let msg = '';
+      if(!haveLeft || !haveRight) msg = '请把两只手放入框内（尽量分开：一左一右）';
+      else if(!locked) msg = '双手已识别 ✅ 现在把准星套住靶心并稳定…';
+      else if(!firstShotDone) msg = '已锁定 ✅ 请扣动扳机开第一枪（开枪后隐藏摄像头）';
+      else msg = 'READY ✅';
 
       ctx.textAlign='center';
       ctx.textBaseline='middle';
       ctx.font = `${18*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
 
-      const padX = 18*DPR, padY = 10*DPR;
+      const padX = 18*DPR;
       const mw = ctx.measureText(msg).width;
       const boxW = mw + padX*2;
       const boxH = 40*DPR;
@@ -399,12 +398,10 @@
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
 
-      // 引导层（PLAY 之前显示，且不遮靶）
       if(bootState !== BOOT.PLAY){
         drawGuideOverlay(haveLeft, haveRight, lockFrames>0);
       }
 
-      // 校准提示
       if(mode === MODE.CAL){
         ctx.fillStyle = 'rgba(255,255,255,0.55)';
         ctx.fillRect(0,0,W,H);
@@ -453,10 +450,19 @@
       freezeAimY = aimY;
       freezeUntil = now + FREEZE_MS;
 
-      trail = []; // 扣扳机瞬间轨迹消失
+      trail = [];
 
       flash();
       beep();
+
+      // ✅ 只有“套住靶心稳定”并且成功击发第一枪，才隐藏摄像头进入纯靶子模式
+      if(!firstShotDone && lockReady){
+        firstShotDone = true;
+        bootState = BOOT.PLAY;
+        video.style.display = 'none';
+        statusEl.textContent = 'READY ✅（已开第一枪，进入纯靶子模式）';
+        hintEl.textContent = '现在：左手扣动=开枪；每枪会定格并清空轨迹，然后开始下一枪轨迹。';
+      }
     }
 
     function getHandIndexByLabel(hdList, labelWanted){
@@ -467,7 +473,6 @@
       return -1;
     }
 
-    // 处理一帧（双手已存在时）
     function processFrame(leftLm, rightLm){
       const now = Date.now();
       if(now < freezeUntil) return;
@@ -508,6 +513,7 @@
           bentFrameCount = 0;
         }
       } else {
+        // 引导阶段/非PLAY：不触发击发（但允许你按“校准”）
         leftWasStraight = false;
         bentFrameCount = 0;
       }
@@ -532,19 +538,20 @@
           trail = [];
           mode = MODE.READY;
           statusEl.textContent = 'READY ✅（校准完成）';
-          hintEl.textContent = '继续：把准星套住靶心稳定，进入纯靶子模式。';
+          hintEl.textContent = '继续：把准星套住靶心稳定，然后开第一枪（开枪后隐藏摄像头）。';
           btnCal.disabled = false;
         }
       }
     }
 
-    // 引导：双手 + 套住靶心稳定 -> 隐藏摄像头
+    // 引导：双手 + 套住靶心稳定 -> 仅允许第一枪（不隐藏）；第一枪成功击发才隐藏
     function updateBootState(haveLeft, haveRight){
       if(bootState === BOOT.PLAY) return;
 
       if(!haveLeft || !haveRight){
         bootState = BOOT.NEED_BOTH;
         lockFrames = 0;
+        lockReady = false;
         statusEl.textContent = '等待双手…';
         hintEl.textContent = '请把两只手放进虚线框内：尽量左右分开。';
         return;
@@ -558,20 +565,18 @@
       if(lockedNow) lockFrames++;
       else lockFrames = 0;
 
-      statusEl.textContent = lockedNow
-        ? `锁定中… ${lockFrames}/${LOCK_FRAMES_NEED}`
-        : '双手已识别 ✅ 请套住靶心';
-
-      hintEl.textContent = lockedNow
-        ? '保持不动一小会儿：锁定完成后将隐藏摄像头，进入纯靶子模式。'
-        : '把准星移到靶心上（套住圆心），并保持稳定。';
-
       if(lockFrames >= LOCK_FRAMES_NEED){
-        bootState = BOOT.PLAY;
-        video.style.display = 'none';
-        statusEl.textContent = 'READY ✅（可射击）';
-        hintEl.textContent = '左手食指稍微扣动=开枪；每枪会定格并清空轨迹，然后开始下一枪轨迹。';
-        trail = [];
+        lockReady = true;
+        statusEl.textContent = '已锁定 ✅ 请扣动扳机开第一枪';
+        hintEl.textContent = '第一枪必须在套住靶心状态下击发：击发后将隐藏摄像头进入纯靶子模式。';
+      } else {
+        lockReady = false;
+        statusEl.textContent = lockedNow
+          ? `锁定中… ${lockFrames}/${LOCK_FRAMES_NEED}`
+          : '双手已识别 ✅ 请套住靶心';
+        hintEl.textContent = lockedNow
+          ? '保持不动一小会儿：锁定完成后请开第一枪（开枪后隐藏摄像头）。'
+          : '把准星移到靶心上（套住圆心），并保持稳定。';
       }
     }
 
@@ -620,6 +625,8 @@
       video.style.display = 'block';
       bootState = BOOT.NEED_BOTH;
       lockFrames = 0;
+      lockReady = false;
+      firstShotDone = false;
 
       // mirror
       video.style.transform = (facingMode==='user') ? 'scaleX(-1)' : 'none';
@@ -671,6 +678,8 @@
 
       bootState = BOOT.NEED_BOTH;
       lockFrames = 0;
+      lockReady = false;
+      firstShotDone = false;
       video.style.display = 'block';
 
       calOkFrames=0;
