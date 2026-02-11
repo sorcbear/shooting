@@ -73,48 +73,51 @@
     resize();
 
     // ===== 摄像头 =====
-    let facingMode = 'user'; // 'user'前置 'environment'后置
+    let facingMode = 'user';
 
-    // ===== 靶子参数（固定在中心）=====
-    const targetSquare = 86;      // 中心方框半边长（px）
-    const ringCount = 10;         // 10环
-    const ringStep = 18;          // 每环间距（px）
-    const ringLine = 3;           // 环线粗细
+    // =========================
+    // ✅ 10m 气步枪靶子（视觉近似）
+    // - 多个细环线
+    // - 中心黑区（10环黑心）
+    // =========================
+    const ringCount = 10;       // 10~1
+    const ringStep  = 18;       // 每环间距（px）——你觉得太大/小就改这里
+    const ringLine  = 2;        // 环线粗细
+    const blackCoreRings = 2.2; // ✅ 黑区半径=多少“环距”（经验值：2.0~2.6像10m AR 黑区感觉）
 
-    // ===== 瞄准器样式（跟随手）——按你的 GIF 风格 =====
-    const sight_outer_r = 120; // 外圈半径
-    const sight_outer_w = 28;  // 外圈粗细
+    // =========================
+    // ✅ 瞄准器（跟随手）——你的 GIF 风格
+    // - 去掉“内白圈”（你说不需要白边）
+    // =========================
+    const sight_outer_r = 120;
+    const sight_outer_w = 28;
     const sight_bar_w   = 8;
     const sight_bar_len = 40;
     const sight_bar_gap = 5;
     const sight_inner_black_r = 44;
     const sight_inner_black_w = 14;
-    const sight_inner_white_r = 34;
-    const sight_inner_white_w = 6;
 
     // ===== 进枪轨迹 =====
     let trail = [];
     const trailMax = 220;
-    const trailMinMove = 2.0; // px
+    const trailMinMove = 2.0;
 
     // ===== 准星平滑 =====
     let aimX=null, aimY=null;
-    const followAlpha = 0.22; // 越小越稳、越大越灵
+    const followAlpha = 0.22;
     let sensitivity = 1.05;
 
-    // ===== 校准偏移（把当前准星对齐靶心）=====
+    // ===== 校准偏移 =====
     let calOffX = 0, calOffY = 0;
 
-    // ===== 扣枪（食指弯曲）检测 =====
-    // 用食指 PIP 关节角度：直时接近 180°，弯时变小
-    const STRAIGHT_DEG = 165; // 判定“直”
-    const BENT_DEG     = 110; // 判定“弯”——触发扣枪
+    // ===== 扣枪（食指弯曲）=====
+    const STRAIGHT_DEG = 165;
+    const BENT_DEG     = 110;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
     let wasStraight = false;
 
-    // ===== 记录成绩 =====
-    let shots = []; // {t,score,x,y,d}
+    let shots = [];
     function logShot(s){
       shots.unshift(s);
       if(shots.length>12) shots.pop();
@@ -124,7 +127,6 @@
       }).join('<br>');
     }
 
-    // ===== 工具：角度（A-B-C, 取B点角度）=====
     function angleDeg(ax,ay,bx,by,cx,cy){
       const abx=ax-bx, aby=ay-by;
       const cbx=cx-bx, cby=cy-by;
@@ -136,10 +138,9 @@
       return Math.acos(cos) * 180/Math.PI;
     }
 
-    // ===== MediaPipe 归一化坐标 -> 屏幕 =====
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
-      if(facingMode==='user') x = 1-x; // 镜像更符合直觉
+      if(facingMode==='user') x = 1-x;
       let px = x*W + calOffX;
       let py = y*H + calOffY;
       px = cx + (px-cx)*sensitivity;
@@ -158,12 +159,11 @@
       if(trail.length>trailMax) trail.shift();
     }
 
-    // ===== 画靶子 =====
+    // ===== 画 10m 气步枪靶 =====
     function drawTarget(){
-      // 白底
       ctx.clearRect(0,0,W,H);
 
-      // 环线（10->1，从内到外）
+      // 环线
       ctx.lineWidth = ringLine*DPR;
       ctx.strokeStyle = '#000';
       for(let i=1;i<=ringCount;i++){
@@ -173,72 +173,24 @@
         ctx.stroke();
       }
 
-      // 中心方框（你要的“圆心外面还有一个方框”）
-      const s = targetSquare*DPR;
-      ctx.lineWidth = 4*DPR;
-      ctx.strokeRect(cx-s, cy-s, 2*s, 2*s);
-
-      // 环数标注（简单放右上象限）
+      // 中心黑区（10环黑心）
+      const blackR = blackCoreRings * ringStep * DPR;
       ctx.fillStyle = '#000';
-      ctx.font = `${12*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
-      ctx.textAlign='left'; ctx.textBaseline='middle';
-      for(let i=1;i<=ringCount;i++){
-        const r = i*ringStep*DPR;
-        const label = (11-i).toString(); // 内圈=10
-        ctx.fillText(label, cx + r - 10*DPR, cy - r + 10*DPR);
-      }
+      ctx.beginPath();
+      ctx.arc(cx, cy, blackR, 0, Math.PI*2);
+      ctx.fill();
+
+      // （可选）你如果想要“靶心白点”/或更像印刷的微小中心点，可以在这儿加
+      // ctx.fillStyle='#fff';
+      // ctx.beginPath(); ctx.arc(cx,cy,2*DPR,0,Math.PI*2); ctx.fill();
     }
 
-    // ===== 画瞄准器（不画圆心黑点）=====
-    function drawSight(x,y){
-      // 外圈粗黑
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = sight_outer_w*DPR;
-      ctx.beginPath();
-      ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
-      ctx.stroke();
-
-      // 左右两条横线（在外圈内侧）
-      const outerInner = (sight_outer_r - sight_outer_w/2)*DPR;
-      const barW = sight_bar_w*DPR;
-      const barLen = sight_bar_len*DPR;
-      const gap = sight_bar_gap*DPR;
-
-      ctx.fillStyle = '#000';
-      // left
-      let x1 = x - outerInner + gap;
-      let x2 = x1 + barLen;
-      let y1 = y - barW/2;
-      let y2 = y + barW/2;
-      roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
-
-      // right
-      x2 = x + outerInner - gap;
-      x1 = x2 - barLen;
-      roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
-
-      // 内黑圈
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = sight_inner_black_w*DPR;
-      ctx.beginPath();
-      ctx.arc(x,y, sight_inner_black_r*DPR, 0, Math.PI*2);
-      ctx.stroke();
-
-      // 内白圈
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = sight_inner_white_w*DPR;
-      ctx.beginPath();
-      ctx.arc(x,y, sight_inner_white_r*DPR, 0, Math.PI*2);
-      ctx.stroke();
-    }
-
+    // ===== 画瞄准器（去掉内白圈）=====
     function roundRectFill(x,y,w,h,r){
-      // Canvas roundRect 兼容
       ctx.beginPath();
       if(ctx.roundRect){
         ctx.roundRect(x,y,w,h,r);
       }else{
-        // fallback
         const rr = Math.min(r, w/2, h/2);
         ctx.moveTo(x+rr,y);
         ctx.arcTo(x+w,y, x+w,y+h, rr);
@@ -250,7 +202,41 @@
       ctx.fill();
     }
 
-    // ===== 画进枪轨迹 =====
+    function drawSight(x,y){
+      // 外圈粗黑
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = sight_outer_w*DPR;
+      ctx.beginPath();
+      ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
+      ctx.stroke();
+
+      // 左右横线
+      const outerInner = (sight_outer_r - sight_outer_w/2)*DPR;
+      const barW = sight_bar_w*DPR;
+      const barLen = sight_bar_len*DPR;
+      const gap = sight_bar_gap*DPR;
+
+      ctx.fillStyle = '#000';
+      let x1 = x - outerInner + gap;
+      let x2 = x1 + barLen;
+      let y1 = y - barW/2;
+      let y2 = y + barW/2;
+      roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
+
+      x2 = x + outerInner - gap;
+      x1 = x2 - barLen;
+      roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
+
+      // 内黑圈（厚）
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = sight_inner_black_w*DPR;
+      ctx.beginPath();
+      ctx.arc(x,y, sight_inner_black_r*DPR, 0, Math.PI*2);
+      ctx.stroke();
+
+      // ✅ 不画内白圈（你说不需要白边）
+    }
+
     function drawTrail(){
       if(trail.length<2) return;
       ctx.lineWidth = 3*DPR;
@@ -261,9 +247,8 @@
       ctx.stroke();
     }
 
-    // ===== 计分（10..1）=====
+    // ===== 计分（整数环 10..1，超出=0）=====
     function scoreFromDist(dpx){
-      // 内圈 r=ringStep -> 10环；超过 ringCount*ringStep -> 0（脱靶）
       const r = dpx / (ringStep*DPR);
       const ringIndex = Math.ceil(r); // 1..10
       if(ringIndex<=0) return 10;
@@ -271,7 +256,6 @@
       return 11 - ringIndex;
     }
 
-    // ===== 扣枪触发 =====
     function tryShot(){
       const now = Date.now();
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
@@ -281,10 +265,9 @@
       const score = scoreFromDist(d);
 
       lastShotTs = now;
-      logShot({t:now, score, x:aimX, y:aimY, d});
+      logShot({t:now, score, d});
     }
 
-    // ===== 主渲染 =====
     function render(){
       drawTarget();
       drawTrail();
@@ -324,11 +307,9 @@
         statusEl.textContent = '右手检测 ✅（食指移动瞄准；弯曲=扣枪）';
 
         const lm = lmList[idx];
-
-        // 关键点：食指 MCP=5, PIP=6, TIP=8
         const mcp = lm[5], pip = lm[6], tip = lm[8];
 
-        // 准星位置：用 tip
+        // 准星
         const p = mapToScreen(tip.x, tip.y);
         if(aimX==null){ aimX=p.px; aimY=p.py; }
         else{
@@ -337,13 +318,12 @@
         }
         pushTrail(aimX, aimY);
 
-        // 扣枪：用食指关节角度（越直越接近 180）
+        // 扣枪：食指角度
         const A = mapToScreen(mcp.x, mcp.y);
         const B = mapToScreen(pip.x, pip.y);
         const C = mapToScreen(tip.x, tip.y);
         const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
 
-        // 状态机：先“直”，再“弯”触发一次
         if(ang >= STRAIGHT_DEG) wasStraight = true;
         if(wasStraight && ang <= BENT_DEG){
           wasStraight = false;
