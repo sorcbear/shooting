@@ -195,16 +195,34 @@
     // Scoring: 10.9 max
     // =========================
     function scoreFromDist(dpx){
-      const maxR = targetSquareHalf * DPR;
+  // 1) 10.0 边界：用你“中心小圆点”的半径当 10环边界
+      const tenRingR = targetDotR * DPR;          // <= 这个圈内才会出现 10.x
+      const maxR     = targetSquareHalf * DPR;    // 最外（边界）视为 0 分
+
       if(dpx >= maxR) return 0.0;
-      const ringW = maxR / 10;
-      const ringIndex = Math.min(9, Math.floor(dpx / ringW));
-      const base = 10 - ringIndex;
-      const frac = (dpx - ringIndex * ringW) / ringW;
-      let s = base + (1 - frac) * 0.9;
-      s = Math.max(0, Math.min(10.9, s));
-      return Math.round(s * 10) / 10;
+
+  // 2) 10环外的每个“整环宽度”
+  // 从 tenRingR 到 maxR 一共 9 个整数环（9到1）
+      const ringStep = (maxR - tenRingR) / 9;
+
+      let score;
+      if(dpx <= tenRingR){
+    // 10.9(中心) -> 10.0(十环边界)
+        const t = dpx / tenRingR;                 // 0..1
+        score = 10 + 0.9 * (1 - t);
+      }else{
+        const k = (dpx - tenRingR) / ringStep;    // 0..9
+        const ringIndex = Math.floor(k) + 1;      // 1=>9环, 2=>8环 ... 9=>1环
+        const base = 10 - ringIndex;              // 9..1
+        const f = k - Math.floor(k);              // 0..1，环内位置：内侧->外侧
+        score = base + 0.9 * (1 - f);             // 内侧 base+0.9，外侧 base+0.0
+      }
+
+  // 3) clamp + 四舍五入到 0.1
+      score = Math.max(0, Math.min(10.9, score));
+      return Math.round(score * 10) / 10;
     }
+
 
     // score list
     let shotScores = [];
