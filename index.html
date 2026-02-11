@@ -161,7 +161,7 @@
     // Aim (右手)
     let aimX=null, aimY=null;
     const followAlpha = 0.75;
-    let sensitivity = 1.2; // 灵敏度
+    let sensitivity = 1.5; // 灵敏度
 
     // Calibration
     let calOffX = 0, calOffY = 0;
@@ -194,22 +194,31 @@
 
 // 斜率放大系数：让离中心越远掉分快
 // 经验值：如果你观察到“某个位置原来显示 8.0，现在希望显示 7.0”，用 1.3448
-const SLOPE_MULT = 1.2;
 
 function scoreFromAimPos(aimX_px, aimY_px){
-  // 1) 距离（像素）
+  // 1) 准星中心到靶心的距离（像素）
   const d_px = Math.hypot(aimX_px - cx, aimY_px - cy);
 
-  // 2) 黑心半径（像素）= 7环线半径
-  const Rb_px = targetDotR * DPR;
+  // 2) 黑点半径 & 内环半径（像素）
+  const Rb_px  = targetDotR * DPR;        // 黑点半径
+  const Rin_px = sight_inner_r * DPR;     // 准星内环半径
 
-  // 3) 计分：上限仍为 10.9，只是斜率变大
-  let score = 10.9 - (3.1 * SLOPE_MULT) * (d_px / Rb_px);
+  // 3) 参考距离：黑点边缘刚好触碰内环（相切）
+  //    d_ref = Rin - Rb
+  const d_ref = Math.max(1e-6, Rin_px - Rb_px); // 防止除0
 
-  // 4) 边界 & 一位小数
+  // 4) 线性等比例：
+  //    d=0 -> 10.9
+  //    d=d_ref -> 7.8  (因为 10.9 - 3.1 = 7.8)
+  let score = 10.9 - 3.1 * (d_px / d_ref);
+
+  // 5) 边界 & 一位小数
   score = Math.max(0, Math.min(10.9, score));
   return Math.round(score * 10) / 10;
 }
+
+
+
 
 
     let shotScores = [];
