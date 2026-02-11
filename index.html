@@ -27,9 +27,7 @@
       appearance:none;border:1px solid #111;background:#fff;color:#111;
       padding:8px 10px;border-radius:10px;font-weight:800
     }
-    #hud button:disabled{
-      opacity:.45
-    }
+    #hud button:disabled{ opacity:.45 }
 
     #log{
       position:fixed;left:12px;bottom:12px;right:12px;
@@ -42,7 +40,7 @@
 </head>
 <body>
   <div id="hud">
-    <div><b>Finger Rifle</b> <span class="muted">左手掌控准星 · 右手食指扳机</span></div>
+    <div><b>Finger Rifle</b> <span class="muted">右手食指控准星 · 左手食指扳机</span></div>
     <span id="status" class="pill">初始化…</span>
 
     <button id="btnCal">校准准心（需双手）</button>
@@ -50,7 +48,7 @@
     <button id="btnFlip">切换前/后摄像头</button>
 
     <span class="muted" id="hint">
-      规则：必须同时识别到左右手才开始。校准时让左手掌心对准靶心保持不动。
+      规则：必须同时识别到左右手才开始。校准时让“控准星手指”对准中心小圆点保持不动。
     </span>
   </div>
 
@@ -63,22 +61,17 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
 
   <script>
-    // =========================
     // DOM
-    // =========================
     const video = document.getElementById('video');
     const canvas = document.getElementById('cv');
     const ctx = canvas.getContext('2d');
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
-
     const btnCal = document.getElementById('btnCal');
     const btnClear = document.getElementById('btnClear');
     const btnFlip = document.getElementById('btnFlip');
 
-    // =========================
     // Canvas size
-    // =========================
     let W=0,H=0,DPR=1,cx=0,cy=0;
     function resize(){
       DPR = Math.max(1, Math.floor(window.devicePixelRatio||1));
@@ -92,24 +85,19 @@
     addEventListener('resize', resize);
     resize();
 
-    // =========================
     // Camera
-    // =========================
-    let facingMode = 'user'; // 前置 user / 后置 environment
+    let facingMode = 'user';
 
-    // =========================
     // States
-    // =========================
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
     let mode = MODE.WAIT_BOTH;
 
     // =========================
-    // Target (10m AR - visual approximation)
+    // ✅ 目标靶心：白色正方形 + 中心小圆点（无环线）
     // =========================
-    const ringCount = 10;
-    const ringStep  = 12;      // ✅ 靶子整体大小：越小靶越小
-    const ringLine  = 2;
-    const blackCoreRings = 1.8; // ✅ 圆心黑区：越小黑区越小（1.6~2.2）
+    const targetSquareHalf = 80; // 正方形半边长（px）
+    const targetSquareLine = 4;  // 正方形边线粗细（px）
+    const targetDotR = 6;        // 中心小圆点半径（px）
 
     // =========================
     // Sight (GIF-like) - NO inner white ring
@@ -122,62 +110,53 @@
     const sight_inner_black_r = 44;
     const sight_inner_black_w = 14;
 
-    // =========================
     // Trail (blue)
-    // =========================
     let trail = [];
     const trailMax = 220;
     const trailMinMove = 2.5;
-    const trailColor = 'rgba(30,136,229,0.60)'; // #1E88E5-ish
+    const trailColor = 'rgba(30,136,229,0.60)';
 
     // =========================
-    // Aim controlled by LEFT palm only
+    // ✅ 准星由“右手食指”控制（改成手指，不用手掌）
+    // 右手 index_tip = 8
     // =========================
     let aimX=null, aimY=null;
-    const followAlpha = 0.16; // ✅ ringStep 小时建议更稳
+    const followAlpha = 0.16;
     let sensitivity = 1.00;
 
-    // Calibration offset (screen space, applied after mirroring)
+    // Calibration offset
     let calOffX = 0, calOffY = 0;
 
     // =========================
-    // Trigger by RIGHT index only
+    // ✅ 扳机由“左手食指”控制（左右手换一下）
+    // 左手食指从直->弯 触发
     // =========================
     const STRAIGHT_DEG = 160;
     const BENT_DEG     = 125;
-
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
-    let rightWasStraight = false;
-
-    // “弯曲连续N帧才触发”——减少误触发
+    let leftWasStraight = false;
     const BENT_FRAMES_NEED = 3;
     let bentFrameCount = 0;
 
-    // =========================
-    // Calibration stability requirement
-    // =========================
-    const CAL_FRAMES_NEED = 20;         // 连续稳定帧
-    const CAL_STABLE_RMS_PX = 6;        // 左手掌心抖动 RMS 阈值（px）
-    let calBuf = [];                   // {x,y}
+    // Calibration stability
+    const CAL_FRAMES_NEED = 20;
+    const CAL_STABLE_RMS_PX = 6;
+    let calBuf = [];
     let calOkFrames = 0;
 
-    // =========================
-    // Score log
-    // =========================
+    // Log
     let shots = [];
     function logShot(s){
       shots.unshift(s);
       if(shots.length>12) shots.pop();
       logEl.innerHTML = shots.map((r,i)=>{
         const ts = new Date(r.t).toLocaleTimeString();
-        return `${i+1}. ${ts}  score=${r.score}  d=${r.d.toFixed(1)}px`;
+        return `${i+1}. ${ts}  hit=${r.hit}  d=${r.d.toFixed(1)}px`;
       }).join('<br>');
     }
 
-    // =========================
     // Utils
-    // =========================
     const ema = (prev,next,a)=> prev + (next-prev)*a;
 
     function angleDeg(ax,ay,bx,by,cx,cy){
@@ -193,15 +172,13 @@
 
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
-      if(facingMode==='user') x = 1 - x;         // 镜像更符合直觉
+      if(facingMode==='user') x = 1 - x; // mirror for selfie
       let px = x * W + calOffX;
       let py = y * H + calOffY;
 
-      // sensitivity about center
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
 
-      // clamp
       px = Math.max(0, Math.min(W, px));
       py = Math.max(0, Math.min(H, py));
       return {px,py};
@@ -226,30 +203,27 @@
       return Math.sqrt(ms);
     }
 
-    // =========================
-    // Draw target + trail + sight
-    // =========================
+    // Draw: target (square + dot)
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
 
-      // rings
-      ctx.lineWidth = ringLine*DPR;
-      ctx.strokeStyle = '#000';
-      for(let i=1;i<=ringCount;i++){
-        const r = i * ringStep * DPR;
-        ctx.beginPath();
-        ctx.arc(cx,cy,r,0,Math.PI*2);
-        ctx.stroke();
-      }
+      // white square with black stroke
+      const half = targetSquareHalf * DPR;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
 
-      // black core
-      const blackR = blackCoreRings * ringStep * DPR;
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = targetSquareLine * DPR;
+      ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
+
+      // center small dot
       ctx.fillStyle = '#000';
       ctx.beginPath();
-      ctx.arc(cx, cy, blackR, 0, Math.PI*2);
+      ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2);
       ctx.fill();
     }
 
+    // Draw: sight
     function roundRectFill(x,y,w,h,r){
       ctx.beginPath();
       if(ctx.roundRect){
@@ -267,14 +241,12 @@
     }
 
     function drawSight(x,y){
-      // outer
       ctx.strokeStyle = '#000';
       ctx.lineWidth = sight_outer_w*DPR;
       ctx.beginPath();
       ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
       ctx.stroke();
 
-      // bars
       const outerInner = (sight_outer_r - sight_outer_w/2)*DPR;
       const barW = sight_bar_w*DPR;
       const barLen = sight_bar_len*DPR;
@@ -291,7 +263,6 @@
       x1 = x2 - barLen;
       roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
 
-      // inner black ring
       ctx.strokeStyle = '#000';
       ctx.lineWidth = sight_inner_black_w*DPR;
       ctx.beginPath();
@@ -299,6 +270,7 @@
       ctx.stroke();
     }
 
+    // Draw: trail
     function drawTrail(){
       if(trail.length<2) return;
       ctx.lineWidth = 3*DPR;
@@ -314,7 +286,7 @@
       drawTrail();
       if(aimX!=null) drawSight(aimX, aimY);
 
-      // mode hint overlay (optional minimal)
+      // overlay hints when not READY
       if(mode !== MODE.READY){
         ctx.fillStyle = 'rgba(255,255,255,0.75)';
         ctx.fillRect(0,0,W,H);
@@ -323,41 +295,31 @@
         ctx.textAlign='center'; ctx.textBaseline='middle';
 
         if(mode === MODE.WAIT_BOTH){
-          ctx.fillText('请同时出示左右手（左手掌控准星，右手食指扳机）', cx, cy);
+          ctx.fillText('请同时出示左右手（右手食指控准星，左手食指扳机）', cx, cy);
         }else if(mode === MODE.CAL){
-          ctx.fillText('校准中：保持双手出现，让左手掌心对准靶心并保持不动…', cx, cy - 16*DPR);
+          ctx.fillText('校准中：保持双手出现，让“控准星手指”对准中心小圆点并保持不动…', cx, cy - 16*DPR);
           ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
           ctx.fillText(`稳定帧：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy + 18*DPR);
         }
       }
     }
 
-    // =========================
-    // Scoring (integer 10..1, outside=0)
-    // =========================
-    function scoreFromDist(dpx){
-      const r = dpx / (ringStep*DPR);
-      const ringIndex = Math.ceil(r); // 1..10
-      if(ringIndex<=0) return 10;
-      if(ringIndex>ringCount) return 0;
-      return 11 - ringIndex;
-    }
-
+    // ===== Hit test instead of rings =====
+    // Define a small "hit radius" around center dot for logging
+    const HIT_RADIUS_PX = 30; // 你想更严格就调小，比如 18
     function fire(){
       const now = Date.now();
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
       if(aimX==null) return;
 
       const d = Math.hypot(aimX-cx, aimY-cy);
-      const score = scoreFromDist(d);
+      const hit = d <= HIT_RADIUS_PX * DPR ? 'CENTER' : 'MISS';
 
       lastShotTs = now;
-      logShot({t: now, score, d});
+      logShot({t: now, hit, d});
     }
 
-    // =========================
     // MediaPipe: find Left/Right hands
-    // =========================
     function getHandIndexByLabel(hdList, labelWanted){
       for(let i=0;i<hdList.length;i++){
         const label = hdList[i]?.label || hdList[i]?.classification?.[0]?.label;
@@ -366,76 +328,64 @@
       return -1;
     }
 
-    // =========================
-    // Main logic per frame
-    // - Must have BOTH hands to be active
-    // - LEFT palm controls aim
-    // - RIGHT index controls trigger only
-    // =========================
+    // Main per-frame
     function processFrame(leftLm, rightLm){
-      // LEFT palm = middle_mcp(9) (stable)
-      const palm = leftLm[9];
-      const palmP = mapToScreen(palm.x, palm.y);
+      // ✅ RIGHT index controls aim
+      const rightTip = rightLm[8]; // index_tip
+      const rightTipP = mapToScreen(rightTip.x, rightTip.y);
 
-      // update aim only when READY or CAL (freeze in WAIT_BOTH)
-      if(aimX==null){ aimX = palmP.px; aimY = palmP.py; }
+      if(aimX==null){ aimX = rightTipP.px; aimY = rightTipP.py; }
       else{
-        aimX = ema(aimX, palmP.px, followAlpha);
-        aimY = ema(aimY, palmP.py, followAlpha);
+        aimX = ema(aimX, rightTipP.px, followAlpha);
+        aimY = ema(aimY, rightTipP.py, followAlpha);
       }
 
-      // record trail only in READY
       if(mode === MODE.READY){
         pushTrail(aimX, aimY);
       }
 
-      // RIGHT trigger: index angle (MCP=5, PIP=6, TIP=8)
-      const mcp = rightLm[5], pip = rightLm[6], tip = rightLm[8];
+      // ✅ LEFT index controls trigger
+      const mcp = leftLm[5], pip = leftLm[6], tip = leftLm[8];
+
       const A = mapToScreen(mcp.x, mcp.y);
       const B = mapToScreen(pip.x, pip.y);
       const C = mapToScreen(tip.x, tip.y);
       const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
 
-      // state machine for trigger, only in READY
       if(mode === MODE.READY){
-        if(ang >= STRAIGHT_DEG) rightWasStraight = true;
+        if(ang >= STRAIGHT_DEG) leftWasStraight = true;
 
-        if(rightWasStraight && ang <= BENT_DEG){
+        if(leftWasStraight && ang <= BENT_DEG){
           bentFrameCount++;
           if(bentFrameCount >= BENT_FRAMES_NEED){
             bentFrameCount = 0;
-            rightWasStraight = false;
+            leftWasStraight = false;
             fire();
           }
         } else {
           bentFrameCount = 0;
         }
       } else {
-        // not ready -> don't arm
-        rightWasStraight = false;
+        leftWasStraight = false;
         bentFrameCount = 0;
       }
 
-      // Calibration flow: align LEFT palm to center when stable
+      // Calibration: use RIGHT tip stability (control finger)
       if(mode === MODE.CAL){
-        calBuf.push({x: palmP.px, y: palmP.py});
+        calBuf.push({x: rightTipP.px, y: rightTipP.py});
         if(calBuf.length > CAL_FRAMES_NEED) calBuf.shift();
 
         const rms = rmsDist(calBuf);
         const stable = (calBuf.length >= 8) && (rms <= CAL_STABLE_RMS_PX * DPR);
 
-        if(stable){
-          calOkFrames++;
-        } else {
-          calOkFrames = 0;
-        }
+        if(stable) calOkFrames++;
+        else calOkFrames = 0;
 
         if(calOkFrames >= CAL_FRAMES_NEED){
-          // Use current (smoothed) aim as reference: make it exactly center
+          // Make aim center
           calOffX += (cx - aimX);
           calOffY += (cy - aimY);
 
-          // Reset
           calOkFrames = 0;
           calBuf = [];
           trail = [];
@@ -446,9 +396,7 @@
       }
     }
 
-    // =========================
-    // MediaPipe Hands init
-    // =========================
+    // MediaPipe init
     let hands=null, camera=null;
 
     async function start(){
@@ -472,18 +420,17 @@
         const haveLeft  = leftIdx  !== -1 && lmList[leftIdx];
         const haveRight = rightIdx !== -1 && lmList[rightIdx];
 
-        // Enforce: must have BOTH hands to start / continue
         if(!haveLeft || !haveRight){
           mode = MODE.WAIT_BOTH;
           statusEl.textContent = !haveLeft && !haveRight
             ? '等待双手…'
             : (!haveLeft ? '缺少左手（Left）' : '缺少右手（Right）');
 
-          // Freeze aim/trail/trigger while waiting (keep last aim shown)
-          rightWasStraight = false;
+          // freeze trigger state
+          leftWasStraight = false;
           bentFrameCount = 0;
 
-          // If calibrating and hands disappear -> reset calibration buffer
+          // if calibrating, reset buffer
           if(mode === MODE.CAL){
             calOkFrames = 0;
             calBuf = [];
@@ -493,9 +440,7 @@
           return;
         }
 
-        // Have both
         if(mode === MODE.WAIT_BOTH){
-          // do not auto-calibrate; just become READY (unless user pressed calibrate)
           mode = MODE.READY;
           statusEl.textContent = 'READY ✅（双手已识别）';
         }
@@ -519,16 +464,13 @@
       render();
     }
 
-    // =========================
-    // UI actions
-    // =========================
+    // UI
     btnClear.addEventListener('click', ()=>{
       trail = [];
       render();
     });
 
     btnCal.addEventListener('click', ()=>{
-      // Enter calibration mode; require both hands visible (enforced in loop)
       mode = MODE.CAL;
       calOkFrames = 0;
       calBuf = [];
@@ -542,15 +484,13 @@
       facingMode = (facingMode==='user') ? 'environment' : 'user';
       try{ camera && camera.stop(); }catch{}
 
-      // reset runtime state
       aimX=aimY=null;
       trail=[];
       calOffX=calOffY=0;
-      rightWasStraight=false;
+      leftWasStraight=false;
       bentFrameCount=0;
       mode = MODE.WAIT_BOTH;
 
-      // reset calibration
       calOkFrames=0;
       calBuf=[];
       btnCal.disabled=false;
