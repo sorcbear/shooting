@@ -4,27 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="format-detection" content="telephone=no,address=no,email=no">
-  <title>Air Finger Rifle</title>
+  <title>Air Finger Rifle - ISSF Edition</title>
 
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
-
-    /* 主布局：竖屏上下分；横屏左右分；比例固定 2/3 : 1/3 */
     #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
-
-    /* ✅ 靶区底色白色：方框外不再黑 */
     #leftPane{
       position:relative; flex:0 0 66.6667%; min-height:0;
       background:#fff; overflow:hidden;
     }
-
     #rightPane{
       position:relative; flex:0 0 33.3333%; min-height:0;
       background:#fff; border-top:1px solid #eee;
       overflow:hidden; display:flex; flex-direction:column;
       padding:12px; gap:10px; box-sizing:border-box;
     }
-
     @media (orientation: landscape){
       #app{flex-direction:row;}
       #leftPane{flex:0 0 66.6667%; height:100vh;}
@@ -33,27 +27,15 @@
         border-top:none; border-left:1px solid #eee;
       }
     }
-
-    /* 摄像头铺满左Pane */
     #video{
-      position:absolute; inset:0;
-      width:100%; height:100%;
-      object-fit:cover;
-      transform:scaleX(-1);
-      z-index:0;
-      background:#000;
-      /* ✅ 关键：隐藏时用 opacity，不用 display:none（保证识别稳定） */
-      opacity:1;
-      transition:opacity 120ms linear;
+      position:absolute; inset:0; width:100%; height:100%;
+      object-fit:cover; transform:scaleX(-1); z-index:0;
+      background:#000; opacity:1; transition:opacity 120ms linear;
     }
-
     #cv{
-      position:absolute; inset:0;
-      width:100%; height:100%;
-      touch-action:none;
-      z-index:1;
+      position:absolute; inset:0; width:100%; height:100%;
+      touch-action:none; z-index:1;
     }
-
     #hud{
       font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       color:#111;background:rgba(255,255,255,.96);
@@ -65,7 +47,6 @@
     #hud .pill{border:1px solid #111;border-radius:999px;padding:6px 10px;background:#fff;font-weight:800}
     #hud button{appearance:none;border:1px solid #111;background:#fff;color:#111;padding:8px 10px;border-radius:10px;font-weight:800}
     #hud button:disabled{opacity:.45}
-
     #log{
       flex:1 1 auto; min-height:0;
       font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -73,7 +54,6 @@
       border:1px solid #ddd;border-radius:12px;padding:10px 12px;
       overflow:auto;white-space:pre-wrap
     }
-
     #flash{
       position:absolute; inset:0; z-index:2;
       background:#fff; opacity:0; pointer-events:none;
@@ -92,16 +72,13 @@
 
     <div id="rightPane">
       <div id="hud">
-        <div><b>Finger Rifle</b> <span class="muted">右手食指控准星 · 左手食指扳机</span></div>
+        <div><b>Finger Rifle</b> <span class="muted">右手食指瞄准 · 左手【捏合】开火</span></div>
         <span id="status" class="pill">初始化…</span>
-
         <button id="btnCal">校准准心（需双手）</button>
         <button id="btnClear">清空轨迹</button>
         <button id="btnFlip">切换前/后摄像头</button>
-
         <span class="muted" id="hint"></span>
       </div>
-
       <div id="log"></div>
     </div>
   </div>
@@ -123,7 +100,7 @@
     const btnClear = document.getElementById('btnClear');
     const btnFlip = document.getElementById('btnFlip');
 
-    // Canvas size (以 leftPane 为准)
+    // Canvas size
     let W=0,H=0,DPR=1,cx=0,cy=0;
     function resize(){
       DPR = Math.max(1, Math.floor(window.devicePixelRatio||1));
@@ -144,57 +121,46 @@
     // States
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', CAL:'CAL' };
     let mode = MODE.WAIT_BOTH;
-
     const BOOT = { NEED_BOTH:'NEED_BOTH', NEED_LOCK:'NEED_LOCK', PLAY:'PLAY' };
     let bootState = BOOT.NEED_BOTH;
-
     let firstShotDone = false;
     let lockReady = false;
 
-    // Target
+    // Target Visuals
     const targetSquareHalf = 110;
-    const targetSquareLine = 4;
     const targetDotR = 22;
 
-    // Sight（保持你原来的样式）
+    // Sight Visuals
     const sight_outer_r = 120;
-    const sight_outer_w = 28;
-    const sight_bar_w   = 8;
-    const sight_bar_len = 20;
-    const sight_bar_gap = -2;
-    const sight_inner_black_r = 44; // “内环”
-    const sight_inner_black_w = 14;
+    const sight_inner_black_r = 44; // 视觉上的"黑环"半径
+    // 假设：黑环边缘(44px)对应 7.0环。
+    // 根据公式 7.0 = 10.9 - (r/2.5) => 3.9 = r/2.5 => r = 9.75mm
+    // 所以：屏幕上的 44px 等于现实的 9.75mm
+    const REFERENCE_MM_AT_BLACK_EDGE = 9.75; 
 
     // Trail
     let trail = [];
     const trailMax = 320;
     const trailMinMove = 0.35;
-    const trailColor = 'rgba(30,136,229,0.70)';
-
-    // Aim（灵敏）
+    
+    // Aim (右手)
     let aimX=null, aimY=null;
     const followAlpha = 0.92;
-    let sensitivity = 2.35;
+    let sensitivity = 2.35; // 灵敏度
 
-    // Calibration offset
+    // Calibration
     let calOffX = 0, calOffY = 0;
-
-    // ✅ 扳机参数：完全保持你原始那套
-    const STRAIGHT_DEG = 165;
-    const BENT_DEG     = 120;
-    const SHOT_COOLDOWN_MS = 450;
-    let lastShotTs = 0;
-    let leftWasStraight = false;
-    const BENT_FRAMES_NEED = 3;
-    let bentFrameCount = 0;
-
-    // Calibration stability
     const CAL_FRAMES_NEED = 20;
     const CAL_STABLE_RMS_PX = 6;
     let calBuf = [];
     let calOkFrames = 0;
 
-    // Freeze / flash
+    // Trigger (左手 - 捏合)
+    let isPinched = false;
+    const SHOT_COOLDOWN_MS = 450;
+    let lastShotTs = 0;
+    
+    // Freeze
     const FREEZE_MS = 220;
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
@@ -204,47 +170,35 @@
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
 
-    // Guide rect
-    const guideMargin = 28;
-    function guideRect(){
-      const x = guideMargin * DPR;
-      const y = (guideMargin + 70) * DPR;
-      const w = W - 2*x;
-      const h = H - y - (guideMargin*DPR + 120*DPR);
-      return {x,y,w:Math.max(0,w),h:Math.max(0,h)};
-    }
-
-    // =========================
-    // ✅ 新计分：用 ISSF 比例关系在像素域严格对齐
-    // 目标点：d = 内环半径  -> score ≈ 7.8
-    // ISSF：ringStep=2.5mm, pelletR=2.25mm => pelletR/ringStep=0.9
-    //
-    // 解：
-    // 10.9 - (d - pelletR)/ringStep = 7.8  (在 d=innerRing 时)
-    // => (innerRing - pelletR)/ringStep = 3.1
-    // 又 pelletR = 0.9*ringStep
-    // => ringStep = innerRing / (3.1 + 0.9) = innerRing/4.0
-    // => pelletR = 0.9*ringStep = innerRing*0.225
-    // =========================
+    // ============================================
+    // ✅ 核心修改：新的计分算法 (ISSF 电子靶标准)
+    // Formula: Score = 10.9 - (r_mm / 2.5)
+    // ============================================
     function scoreFromDist(dpx){
-      const innerRingPx = sight_inner_black_r * DPR;
-      const ringStepPx  = innerRingPx / 4.0;
-      const pelletRPx   = ringStepPx * 0.9;
+      // 1. 计算当前屏幕的 px/mm 比例
+      //    因为我们定义 sight_inner_black_r (44px) 对应 9.75mm (即7环边界)
+      const blackRadiusPx = sight_inner_black_r * DPR;
+      const pixelsPerMm = blackRadiusPx / REFERENCE_MM_AT_BLACK_EDGE;
 
-      const effectivePx = Math.max(0, dpx - pelletRPx);
-      let score = 10.9 - (effectivePx / ringStepPx);
+      // 2. 将当前距离换算为 mm
+      const r_mm = dpx / pixelsPerMm;
 
+      // 3. 代入公式
+      let score = 10.9 - (r_mm / 2.5);
+
+      // 4. 边界处理 (最小0，最大10.9)
       score = Math.max(0, Math.min(10.9, score));
+
+      // 5. 保留一位小数 (Round to nearest 0.1)
       return Math.round(score * 10) / 10;
     }
 
-    // score list
     let shotScores = [];
     function renderScores(){
       let out = '';
       for(let i=0;i<shotScores.length;i++){
         const idx = i+1;
-        out += `${idx},  ${shotScores[i].toFixed(1)}\n`;
+        out += `${idx}.  ${shotScores[i].toFixed(1)}\n`;
         if(idx % 10 === 0){
           const start = idx - 10;
           const sum = shotScores.slice(start, idx).reduce((a,b)=>a+b,0);
@@ -257,29 +211,14 @@
     // Utils
     const ema = (prev,next,a)=> prev + (next-prev)*a;
 
-    function angleDeg(ax,ay,bx,by,cx,cy){
-      const abx=ax-bx, aby=ay-by;
-      const cbx=cx-bx, cby=cy-by;
-      const dot = abx*cbx + aby*cby;
-      const lab = Math.hypot(abx,aby);
-      const lcb = Math.hypot(cbx,cby);
-      if(lab===0||lcb===0) return 0;
-      const cos = Math.max(-1, Math.min(1, dot/(lab*lcb)));
-      return Math.acos(cos) * 180/Math.PI;
-    }
-
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
       if(facingMode==='user') x = 1 - x;
-
       let px = x * W + calOffX;
       let py = y * H + calOffY;
-
+      // 增加灵敏度偏移
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
-
-      px = Math.max(0, Math.min(W, px));
-      py = Math.max(0, Math.min(H, py));
       return {px,py};
     }
 
@@ -295,132 +234,79 @@
       if(points.length<2) return 9999;
       const mx = points.reduce((s,p)=>s+p.x,0)/points.length;
       const my = points.reduce((s,p)=>s+p.y,0)/points.length;
-      const ms = points.reduce((s,p)=>{
-        const dx=p.x-mx, dy=p.y-my;
-        return s + dx*dx + dy*dy;
-      },0)/points.length;
-      return Math.sqrt(ms);
+      return Math.sqrt(points.reduce((s,p)=>s+(p.x-mx)**2+(p.y-my)**2,0)/points.length);
     }
 
-    // Draw
+    // Draw Functions
     function drawTarget(){
       ctx.clearRect(0,0,W,H);
       const half = targetSquareHalf * DPR;
-
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
-
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = targetSquareLine * DPR;
+      // 靶纸底色
+      ctx.fillStyle = '#fff'; ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 4 * DPR;
       ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
-
-      ctx.fillStyle = '#000';
-      ctx.beginPath();
-      ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2);
-      ctx.fill();
-    }
-
-    function roundRectFill(x,y,w,h,r){
-      ctx.beginPath();
-      if(ctx.roundRect){
-        ctx.roundRect(x,y,w,h,r);
-      }else{
-        const rr = Math.min(r, w/2, h/2);
-        ctx.moveTo(x+rr,y);
-        ctx.arcTo(x+w,y, x+w,y+h, rr);
-        ctx.arcTo(x+w,y+h, x,y+h, rr);
-        ctx.arcTo(x,y+h, x,y, rr);
-        ctx.arcTo(x,y, x+w,y, rr);
-      }
-      ctx.closePath();
-      ctx.fill();
+      // 黑心
+      ctx.fillStyle = '#000'; ctx.beginPath();
+      ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2); ctx.fill();
     }
 
     function drawSight(x,y){
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = sight_outer_w*DPR;
-      ctx.beginPath();
-      ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
-      ctx.stroke();
-
-      const outerInner = (sight_outer_r - sight_outer_w/2)*DPR;
-      const barW = sight_bar_w*DPR;
-      const barLen = sight_bar_len*DPR;
-      const gap = sight_bar_gap*DPR;
-
+      // 瞄具外圈
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 28*DPR;
+      ctx.beginPath(); ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2); ctx.stroke();
+      
+      // 瞄具横杠 (装饰)
+      const rOuter = (sight_outer_r - 14)*DPR; 
+      const barW = 8*DPR;
       ctx.fillStyle = '#000';
-      let x1 = x - outerInner + gap;
-      let x2 = x1 + barLen;
-      let y1 = y - barW/2;
-      let y2 = y + barW/2;
-      roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
+      ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW); // 左耳
+      ctx.fillRect(x+rOuter, y-barW/2, 20*DPR, barW); // 右耳
 
-      x2 = x + outerInner - gap;
-      x1 = x2 - barLen;
-      roundRectFill(x1,y1,x2-x1,y2-y1, barW/2);
-
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = sight_inner_black_w*DPR;
-      ctx.beginPath();
-      ctx.arc(x,y, sight_inner_black_r*DPR, 0, Math.PI*2);
-      ctx.stroke();
+      // 内环 (决定计分比例的参考环)
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 14*DPR;
+      ctx.beginPath(); ctx.arc(x,y, sight_inner_black_r*DPR, 0, Math.PI*2); ctx.stroke();
     }
 
     function drawTrail(){
       if(trail.length<2) return;
-      ctx.lineWidth = 3*DPR;
-      ctx.strokeStyle = trailColor;
-      ctx.beginPath();
-      ctx.moveTo(trail[0].x, trail[0].y);
+      ctx.lineWidth = 3*DPR; ctx.strokeStyle = 'rgba(30,136,229,0.70)';
+      ctx.beginPath(); ctx.moveTo(trail[0].x, trail[0].y);
       for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x, trail[i].y);
       ctx.stroke();
     }
 
     function drawGuideOverlay(haveLeft, haveRight, locked){
-      const r = guideRect();
+      const margin = 28*DPR;
+      const r = {x:margin, y:margin+70*DPR, w:W-2*margin, h:H-(margin*2+190*DPR)};
+      r.h = Math.max(0,r.h);
+      
       ctx.save();
-
-      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-      ctx.lineWidth = 3*DPR;
-      ctx.setLineDash([10*DPR, 10*DPR]);
-      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 3*DPR;
+      ctx.setLineDash([10*DPR, 10*DPR]); ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.setLineDash([]);
 
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
-      ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      ctx.font = `${14*DPR}px system-ui,sans-serif`;
       ctx.textBaseline = 'top';
-
-      ctx.textAlign = 'left';
-      ctx.fillText('左侧：右手食指控准星', r.x + 10*DPR, r.y + 10*DPR);
-
-      ctx.textAlign = 'right';
-      ctx.fillText('右侧：左手食指扳机', r.x + r.w - 10*DPR, r.y + 10*DPR);
+      ctx.textAlign = 'left'; ctx.fillText('左侧：右手瞄准', r.x+10, r.y+10);
+      ctx.textAlign = 'right'; ctx.fillText('右侧：左手捏合开枪', r.x+r.w-10, r.y+10);
 
       let msg = '';
-      if(!haveLeft || !haveRight) msg = '请把两只手放入框内（尽量分开：一左一右）';
-      else if(!locked) msg = '双手已识别 ✅ 现在把准星套住靶心并稳定…';
-      else if(!firstShotDone) msg = '已锁定 ✅ 请扣动扳机开第一枪（开枪后隐藏摄像头）';
+      if(!haveLeft || !haveRight) msg = '请双手入框（尽量左右分开）';
+      else if(!locked) msg = '双手已识别 ✅ 请将准星对准靶心...';
+      else if(!firstShotDone) msg = '已锁定 ✅ 请捏合左手开第一枪';
       else msg = 'READY ✅';
 
-      ctx.textAlign='center';
-      ctx.textBaseline='middle';
-      ctx.font = `${18*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
-
-      const padX = 18*DPR;
-      const mw = ctx.measureText(msg).width;
-      const boxW = mw + padX*2;
-      const boxH = 40*DPR;
-
-      ctx.fillStyle = 'rgba(255,255,255,0.40)';
-      ctx.fillRect(cx - boxW/2, cy - boxH/2, boxW, boxH);
-
-      ctx.fillStyle = 'rgba(0,0,0,0.80)';
-      ctx.fillText(msg, cx, cy);
-
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.font = `${18*DPR}px system-ui,sans-serif`;
+      const mw = ctx.measureText(msg).width + 36*DPR;
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillRect(cx-mw/2, cy-20*DPR, mw, 40*DPR);
+      ctx.fillStyle = '#000'; ctx.fillText(msg, cx, cy);
       ctx.restore();
     }
 
-    function render(haveLeft=false, haveRight=false){
+    function render(haveLeft, haveRight){
       drawTarget();
       drawTrail();
 
@@ -429,40 +315,25 @@
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
 
-      if(bootState !== BOOT.PLAY){
-        drawGuideOverlay(haveLeft, haveRight, lockFrames>0);
-      }
+      if(bootState !== BOOT.PLAY) drawGuideOverlay(haveLeft, haveRight, lockFrames>0);
 
       if(mode === MODE.CAL){
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.fillRect(0,0,W,H);
-        ctx.fillStyle = '#111';
-        ctx.font = `${18*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('校准中：保持双手出现，让控准星手指对准靶心并保持不动…', cx, cy - 16*DPR);
-        ctx.font = `${14*DPR}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
-        ctx.fillText(`稳定帧：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy + 18*DPR);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(0,0,W,H);
+        ctx.fillStyle = '#111'; ctx.textAlign='center';
+        ctx.font = `${18*DPR}px sans-serif`;
+        ctx.fillText('校准中：保持瞄准靶心不动...', cx, cy-16*DPR);
+        ctx.fillText(`稳定进度：${calOkFrames}/${CAL_FRAMES_NEED}`, cx, cy+18*DPR);
       }
     }
 
     function beep(){
       try{
-        const AC = window.AudioContext || window.webkitAudioContext;
-        const ac = new AC();
-        const o = ac.createOscillator();
-        const g = ac.createGain();
-        o.type = 'square';
-        o.frequency.value = 880;
-        g.gain.value = 0.06;
+        const ac = new (window.AudioContext||window.webkitAudioContext)();
+        const o = ac.createOscillator(); const g = ac.createGain();
+        o.type='square'; o.frequency.value=880; g.gain.value=0.06;
         o.connect(g); g.connect(ac.destination);
-        o.start();
-        setTimeout(()=>{ o.stop(); ac.close(); }, 70);
+        o.start(); setTimeout(()=>{o.stop();ac.close()},70);
       }catch{}
-    }
-
-    function flash(){
-      flashEl.style.opacity = '1';
-      setTimeout(()=>{ flashEl.style.opacity = '0'; }, 80);
     }
 
     function fire(){
@@ -471,36 +342,32 @@
       if(aimX==null) return;
 
       const dpx = Math.hypot(aimX-cx, aimY-cy);
-      const score = scoreFromDist(dpx);
+      const score = scoreFromDist(dpx); // 使用新算法
       shotScores.push(score);
       renderScores();
 
       lastShotTs = now;
-
-      freezeAimX = aimX;
-      freezeAimY = aimY;
+      freezeAimX = aimX; freezeAimY = aimY;
       freezeUntil = now + FREEZE_MS;
-
       trail = [];
-
-      flash();
+      
+      flashEl.style.opacity='1'; setTimeout(()=>flashEl.style.opacity='0',80);
       beep();
 
-      // ✅ 隐藏摄像头：改为 opacity，不用 display:none（识别不掉）
       if(!firstShotDone && lockReady){
         firstShotDone = true;
         bootState = BOOT.PLAY;
-        video.style.opacity = '0';
+        video.style.opacity = '0'; // 隐藏视频
         video.style.pointerEvents = 'none';
-        statusEl.textContent = 'READY ✅（已开第一枪，进入纯靶子模式）';
-        hintEl.textContent = '现在：左手扣动=开枪；每枪会定格并清空轨迹，然后开始下一枪轨迹。';
+        statusEl.textContent = 'READY ✅';
+        hintEl.textContent = '左手食指拇指捏合=开枪';
       }
     }
 
-    function getHandIndexByLabel(hdList, labelWanted){
+    // MediaPipe Hand Logic
+    function getHandIndexByLabel(hdList, label){
       for(let i=0;i<hdList.length;i++){
-        const label = hdList[i]?.label || hdList[i]?.classification?.[0]?.label;
-        if(label === labelWanted) return i;
+        if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
       }
       return -1;
     }
@@ -509,68 +376,62 @@
       const now = Date.now();
       if(now < freezeUntil) return;
 
-      // RIGHT tip controls aim
-      const rightTip = rightLm[8];
-      const rightTipP = mapToScreen(rightTip.x, rightTip.y);
-
-      if(aimX==null){ aimX = rightTipP.px; aimY = rightTipP.py; }
+      // 1. 右手 (Right Hand) 控制准星 -> Index Tip (8)
+      const rTip = rightLm[8];
+      const aimP = mapToScreen(rTip.x, rTip.y);
+      
+      if(aimX==null){ aimX=aimP.px; aimY=aimP.py; }
       else{
-        aimX = ema(aimX, rightTipP.px, followAlpha);
-        aimY = ema(aimY, rightTipP.py, followAlpha);
+        aimX = ema(aimX, aimP.px, followAlpha);
+        aimY = ema(aimY, aimP.py, followAlpha);
       }
+      if(mode === MODE.READY && bootState === BOOT.PLAY) pushTrail(aimX, aimY);
 
-      if(mode === MODE.READY && bootState === BOOT.PLAY){
-        pushTrail(aimX, aimY);
-      }
-
-      // LEFT trigger（✅ 完全保留你原逻辑）
-      const mcp = leftLm[5], pip = leftLm[6], tip = leftLm[8];
-      const A = mapToScreen(mcp.x, mcp.y);
-      const B = mapToScreen(pip.x, pip.y);
-      const C = mapToScreen(tip.x, tip.y);
-      const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
+      // 2. 左手 (Left Hand) 控制扳机 -> Pinch (Thumb 4, Index 8)
+      // ============================================
+      // ✅ 核心修改：捏合检测 (Pinch Detection)
+      // ============================================
+      const lThumb = leftLm[4];
+      const lIndex = leftLm[8];
+      const pT = mapToScreen(lThumb.x, lThumb.y);
+      const pI = mapToScreen(lIndex.x, lIndex.y);
+      
+      // 计算屏幕像素距离
+      const pinchDist = Math.hypot(pT.px - pI.px, pT.py - pI.py);
+      
+      // 阈值：捏合 < 35px*DPR, 松开 > 55px*DPR (设置迟滞区间防止误触)
+      const PINCH_THRESH = 35 * DPR;
+      const RELEASE_THRESH = 55 * DPR;
 
       const allowFire = (mode === MODE.READY) && (bootState === BOOT.PLAY || lockReady);
 
       if(allowFire){
-        if(ang >= STRAIGHT_DEG) leftWasStraight = true;
-
-        if(leftWasStraight && ang <= BENT_DEG){
-          bentFrameCount++;
-          if(bentFrameCount >= BENT_FRAMES_NEED){
-            bentFrameCount = 0;
-            leftWasStraight = false;
+        if(pinchDist < PINCH_THRESH){
+          if(!isPinched){
+            // 状态从未捏合变为捏合 -> 触发
+            isPinched = true;
             fire();
           }
-        } else {
-          bentFrameCount = 0;
+        } else if(pinchDist > RELEASE_THRESH){
+          isPinched = false;
         }
       } else {
-        leftWasStraight = false;
-        bentFrameCount = 0;
+        isPinched = false;
       }
 
-      // Calibration uses RIGHT tip stability
+      // 3. 校准逻辑 (Calibration)
       if(mode === MODE.CAL){
-        calBuf.push({x: rightTipP.px, y: rightTipP.py});
-        if(calBuf.length > CAL_FRAMES_NEED) calBuf.shift();
-
+        calBuf.push({x:aimP.px, y:aimP.py});
+        if(calBuf.length>CAL_FRAMES_NEED) calBuf.shift();
         const rms = rmsDist(calBuf);
-        const stable = (calBuf.length >= 8) && (rms <= CAL_STABLE_RMS_PX * DPR);
-
-        if(stable) calOkFrames++;
-        else calOkFrames = 0;
+        const stable = (calBuf.length>=8) && (rms <= CAL_STABLE_RMS_PX*DPR);
+        if(stable) calOkFrames++; else calOkFrames=0;
 
         if(calOkFrames >= CAL_FRAMES_NEED){
-          calOffX += (cx - aimX);
-          calOffY += (cy - aimY);
-
-          calOkFrames = 0;
-          calBuf = [];
-          trail = [];
+          calOffX += (cx - aimX); calOffY += (cy - aimY);
+          calOkFrames=0; calBuf=[]; trail=[];
           mode = MODE.READY;
-          statusEl.textContent = 'READY ✅（校准完成）';
-          hintEl.textContent = '继续：把准星套住靶心稳定，然后开第一枪（开枪后隐藏摄像头）。';
+          statusEl.textContent = 'READY ✅ 校准完成';
           btnCal.disabled = false;
         }
       }
@@ -578,157 +439,80 @@
 
     function updateBootState(haveLeft, haveRight){
       if(bootState === BOOT.PLAY) return;
-
       if(!haveLeft || !haveRight){
         bootState = BOOT.NEED_BOTH;
-        lockFrames = 0;
-        lockReady = false;
-        statusEl.textContent = '等待双手…';
-        hintEl.textContent = '请把两只手放进虚线框内：尽量左右分开。';
+        lockFrames = 0; lockReady = false;
+        statusEl.textContent = '等待双手...';
+        hintEl.textContent = '左手捏合开火，右手食指瞄准。';
         return;
       }
-
       if(bootState === BOOT.NEED_BOTH) bootState = BOOT.NEED_LOCK;
-
-      const d = (aimX==null) ? 999999 : Math.hypot(aimX - cx, aimY - cy);
-      const lockedNow = d <= (LOCK_DIST_PX * DPR);
-
-      if(lockedNow) lockFrames++;
-      else lockFrames = 0;
+      
+      const d = (aimX==null) ? 9999 : Math.hypot(aimX-cx, aimY-cy);
+      const locked = d <= (LOCK_DIST_PX * DPR);
+      if(locked) lockFrames++; else lockFrames=0;
 
       if(lockFrames >= LOCK_FRAMES_NEED){
         lockReady = true;
-        statusEl.textContent = '已锁定 ✅ 请扣动扳机开第一枪';
-        hintEl.textContent = '第一枪必须在套住靶心状态下击发：击发后将隐藏摄像头进入纯靶子模式。';
+        statusEl.textContent = '已锁定 ✅ 请捏合左手开第一枪';
+        hintEl.textContent = '第一枪后将隐藏摄像头画面。';
       } else {
         lockReady = false;
-        statusEl.textContent = lockedNow
-          ? `锁定中… ${lockFrames}/${LOCK_FRAMES_NEED}`
-          : '双手已识别 ✅ 请套住靶心';
-        hintEl.textContent = lockedNow
-          ? '保持不动一小会儿：锁定完成后请开第一枪（开枪后隐藏摄像头）。'
-          : '把准星移到靶心上（套住圆心），并保持稳定。';
+        statusEl.textContent = locked ? `锁定中... ${lockFrames}/${LOCK_FRAMES_NEED}` : '请对准靶心';
       }
     }
 
-    // MediaPipe init
+    // Init
     let hands=null, camera=null;
-
     async function start(){
-      statusEl.textContent = '请求摄像头权限…';
+      statusEl.textContent = '请求摄像头...';
       resize();
+      hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+      hands.setOptions({maxNumHands:2, modelComplexity:1, minDetectionConfidence:0.7, minTrackingConfidence:0.7});
+      hands.onResults(res=>{
+        const lm = res.multiHandLandmarks||[];
+        const hd = res.multiHandedness||[];
+        const lIdx = getHandIndexByLabel(hd, 'Left');
+        const rIdx = getHandIndexByLabel(hd, 'Right');
+        const hL = lIdx!==-1 && lm[lIdx], hR = rIdx!==-1 && lm[rIdx];
 
-      hands = new Hands({ locateFile: (f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-      hands.setOptions({
-        maxNumHands: 2,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.70,
-        minTrackingConfidence: 0.70,
-      });
-
-      hands.onResults((res)=>{
-        const lmList = res.multiHandLandmarks || [];
-        const hdList = res.multiHandedness || [];
-
-        const leftIdx  = getHandIndexByLabel(hdList, 'Left');
-        const rightIdx = getHandIndexByLabel(hdList, 'Right');
-
-        const haveLeft  = leftIdx  !== -1 && lmList[leftIdx];
-        const haveRight = rightIdx !== -1 && lmList[rightIdx];
-
-        if(!haveLeft || !haveRight){
-          mode = MODE.WAIT_BOTH;
-          leftWasStraight = false;
-          bentFrameCount = 0;
-
-          updateBootState(haveLeft, haveRight);
-          render(haveLeft, haveRight);
-          return;
+        if(!hL || !hR){
+          mode = MODE.WAIT_BOTH; isPinched = false;
+          updateBootState(hL,hR); render(hL,hR); return;
         }
-
-        if(mode === MODE.WAIT_BOTH) mode = MODE.READY;
-
-        processFrame(lmList[leftIdx], lmList[rightIdx]);
-        updateBootState(haveLeft, haveRight);
-        render(haveLeft, haveRight);
+        if(mode===MODE.WAIT_BOTH) mode=MODE.READY;
+        processFrame(lm[lIdx], lm[rIdx]);
+        updateBootState(hL,hR); render(hL,hR);
       });
 
-      // start/reset
-      video.style.opacity = '1';
-      video.style.pointerEvents = 'auto';
-
-      bootState = BOOT.NEED_BOTH;
-      lockFrames = 0;
-      lockReady = false;
-      firstShotDone = false;
-
-      video.style.transform = (facingMode==='user') ? 'scaleX(-1)' : 'none';
-
+      video.style.opacity = '1'; video.style.pointerEvents = 'auto';
+      bootState = BOOT.NEED_BOTH; lockFrames=0; lockReady=false; firstShotDone=false;
+      video.style.transform = (facingMode==='user')?'scaleX(-1)':'none';
+      
       camera = new Camera(video, {
-        onFrame: async ()=>{ await hands.send({image: video}); },
-        width: 640, height: 480,
-        facingMode
+        onFrame: async()=>{ await hands.send({image:video}); },
+        width:640, height:480, facingMode
       });
-
       await camera.start();
-
-      statusEl.textContent = '等待双手…';
-      hintEl.textContent = '请把两只手放进虚线框内：尽量左右分开。';
-      mode = MODE.WAIT_BOTH;
-      render(false,false);
     }
 
-    // UI
-    btnClear.addEventListener('click', ()=>{
-      trail = [];
-      render(true,true);
-    });
-
-    btnCal.addEventListener('click', ()=>{
-      mode = MODE.CAL;
-      calOkFrames = 0;
-      calBuf = [];
-      trail = [];
-      btnCal.disabled = true;
-      statusEl.textContent = '校准中…';
-      hintEl.textContent = '保持双手出现：让控准星手指对准靶心并稳定。';
-      render(true,true);
-    });
-
-    btnFlip.addEventListener('click', async ()=>{
-      facingMode = (facingMode==='user') ? 'environment' : 'user';
-      try{ camera && camera.stop(); }catch{}
-
-      aimX=aimY=null;
-      trail=[];
-      calOffX=calOffY=0;
-      leftWasStraight=false;
-      bentFrameCount=0;
-      mode = MODE.WAIT_BOTH;
-
-      freezeUntil = 0;
-      freezeAimX = freezeAimY = null;
-
-      bootState = BOOT.NEED_BOTH;
-      lockFrames = 0;
-      lockReady = false;
-      firstShotDone = false;
-
-      video.style.opacity = '1';
-      video.style.pointerEvents = 'auto';
-
-      calOkFrames=0;
-      calBuf=[];
-      btnCal.disabled=false;
-
+    btnCal.onclick = ()=>{
+      mode = MODE.CAL; calOkFrames=0; calBuf=[]; trail=[]; btnCal.disabled=true;
+      statusEl.textContent = '校准中...';
+    };
+    btnClear.onclick = ()=>{ trail=[]; render(true,true); };
+    btnFlip.onclick = async ()=>{
+      facingMode = (facingMode==='user')?'environment':'user';
+      try{camera&&camera.stop()}catch{}
+      aimX=aimY=null; trail=[]; calOffX=calOffY=0;
+      isPinched=false; bootState=BOOT.NEED_BOTH; firstShotDone=false;
+      video.style.opacity='1'; video.style.pointerEvents='auto';
       await start();
-    });
+    };
 
-    start().catch(err=>{
-      console.error(err);
-      statusEl.textContent = '启动失败：请在 https 打开并允许摄像头权限';
-      hintEl.textContent = '';
-      render(false,false);
+    start().catch(e=>{
+      console.error(e);
+      statusEl.textContent='启动失败: 请检查摄像头权限或HTTPS连接';
     });
   </script>
 </body>
