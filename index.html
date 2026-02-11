@@ -5,30 +5,71 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="format-detection" content="telephone=no,address=no,email=no">
   <title>Air Finger Rifle</title>
+
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
 
-    /* 摄像头底层 */
-    #video{
+    /* ✅ 主布局：竖屏默认单列；横屏左右分屏 */
+    #app{
       position:fixed; inset:0;
-      width:100vw; height:100vh;
+      display:flex;
+      flex-direction:column;
+      background:#fff;
+    }
+
+    #leftPane{
+      position:relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      background:#000; /* 摄像头底色 */
+      overflow:hidden;
+    }
+
+    #rightPane{
+      position:relative;
+      flex: 0 0 auto;
+      background:#fff;
+      border-top:1px solid #eee;
+      overflow:hidden;
+    }
+
+    /* 横屏：左靶右成绩 */
+    @media (orientation: landscape){
+      #app{ flex-direction:row; }
+      #leftPane{ flex: 0 0 50vw; height:100vh; }
+      #rightPane{
+        flex: 1 1 auto;
+        height:100vh;
+        border-top:none;
+        border-left:1px solid #eee;
+      }
+    }
+
+    /* 摄像头底层（只在左Pane里铺满） */
+    #video{
+      position:absolute; inset:0;
+      width:100%; height:100%;
       object-fit:cover;
       transform:scaleX(-1);
       z-index:0;
       background:#000;
     }
 
-    canvas{
-      position:fixed; inset:0;
-      width:100vw; height:100vh;
+    /* canvas 只覆盖左Pane */
+    #cv{
+      position:absolute; inset:0;
+      width:100%; height:100%;
       touch-action:none;
       z-index:1;
     }
 
+    /* HUD 放右Pane 上方（竖屏时也在下半部分的顶部） */
     #hud{
-      position:fixed;left:12px;top:12px;right:12px;z-index:3;
+      position:absolute;
+      left:12px; right:12px; top:12px;
+      z-index:3;
       font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      color:#111;background:rgba(255,255,255,.90);
+      color:#111;background:rgba(255,255,255,.96);
       border:1px solid #ddd;border-radius:12px;padding:10px 12px;
       display:flex;gap:10px;flex-wrap:wrap;align-items:center
     }
@@ -44,16 +85,28 @@
     }
     #hud button:disabled{ opacity:.45 }
 
+    /* 成绩区：右Pane 下方滚动 */
     #log{
-      position:fixed;left:12px;bottom:12px;right:12px;z-index:3;
+      position:absolute;
+      left:12px; right:12px;
+      top: calc(12px + 60px);
+      bottom:12px;
+      z-index:2;
       font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
-      color:#111;background:rgba(255,255,255,.90);
+      color:#111;background:rgba(255,255,255,.96);
       border:1px solid #ddd;border-radius:12px;padding:10px 12px;
-      max-height:36vh;overflow:auto;white-space:pre-wrap
+      overflow:auto;white-space:pre-wrap
+    }
+
+    /* 竖屏：右Pane 高度更小一些（HUD+log在底部区域） */
+    @media (orientation: portrait){
+      #rightPane{ flex: 0 0 38vh; }
+      #log{ top: calc(12px + 78px); }
+      #hud{ padding:10px 12px; }
     }
 
     #flash{
-      position:fixed; inset:0; z-index:2;
+      position:absolute; inset:0; z-index:2;
       background:#fff;
       opacity:0;
       pointer-events:none;
@@ -61,29 +114,39 @@
     }
   </style>
 </head>
+
 <body>
-  <div id="hud">
-    <div><b>Finger Rifle</b> <span class="muted">右手食指控准星 · 左手食指扳机</span></div>
-    <span id="status" class="pill">初始化…</span>
+  <div id="app">
+    <!-- 左：靶子 + 摄像头 + canvas -->
+    <div id="leftPane">
+      <video id="video" playsinline></video>
+      <canvas id="cv"></canvas>
+      <div id="flash"></div>
+    </div>
 
-    <button id="btnCal">校准准心（需双手）</button>
-    <button id="btnClear">清空轨迹</button>
-    <button id="btnFlip">切换前/后摄像头</button>
+    <!-- 右：HUD + 成绩 -->
+    <div id="rightPane">
+      <div id="hud">
+        <div><b>Finger Rifle</b> <span class="muted">右手食指控准星 · 左手食指扳机</span></div>
+        <span id="status" class="pill">初始化…</span>
 
-    <span class="muted" id="hint"></span>
+        <button id="btnCal">校准准心（需双手）</button>
+        <button id="btnClear">清空轨迹</button>
+        <button id="btnFlip">切换前/后摄像头</button>
+
+        <span class="muted" id="hint"></span>
+      </div>
+
+      <div id="log"></div>
+    </div>
   </div>
-
-  <div id="log"></div>
-  <div id="flash"></div>
-
-  <video id="video" playsinline></video>
-  <canvas id="cv"></canvas>
 
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
 
   <script>
     // DOM
+    const leftPane = document.getElementById('leftPane');
     const video = document.getElementById('video');
     const canvas = document.getElementById('cv');
     const ctx = canvas.getContext('2d');
@@ -95,15 +158,19 @@
     const btnClear = document.getElementById('btnClear');
     const btnFlip = document.getElementById('btnFlip');
 
-    // Canvas size
+    // =========================
+    // Canvas size (✅ 现在以 leftPane 为准)
+    // =========================
     let W=0,H=0,DPR=1,cx=0,cy=0;
+
     function resize(){
       DPR = Math.max(1, Math.floor(window.devicePixelRatio||1));
-      W = Math.floor(innerWidth * DPR);
-      H = Math.floor(innerHeight * DPR);
+      const rect = leftPane.getBoundingClientRect();
+      W = Math.max(1, Math.floor(rect.width * DPR));
+      H = Math.max(1, Math.floor(rect.height * DPR));
       canvas.width = W; canvas.height = H;
-      canvas.style.width = innerWidth+'px';
-      canvas.style.height = innerHeight+'px';
+      canvas.style.width = rect.width+'px';
+      canvas.style.height = rect.height+'px';
       cx = W/2; cy = H/2;
     }
     addEventListener('resize', resize);
@@ -120,14 +187,14 @@
     const BOOT = { NEED_BOTH:'NEED_BOTH', NEED_LOCK:'NEED_LOCK', PLAY:'PLAY' };
     let bootState = BOOT.NEED_BOTH;
 
-    // ✅ 新增：必须“锁定 + 成功击发第一枪”才隐藏摄像头
+    // 必须“锁定 + 成功击发第一枪”才隐藏摄像头
     let firstShotDone = false;
     let lockReady = false;
 
     // =========================
     // Target: square + center dot
     // =========================
-    const targetSquareHalf = 80;
+    const targetSquareHalf = 80;   // 目标方框半边
     const targetSquareLine = 4;
     const targetDotR = 25;
 
@@ -142,21 +209,25 @@
     const sight_inner_black_r = 44;
     const sight_inner_black_w = 14;
 
-    // Trail（较敏感）
+    // Trail
     let trail = [];
     const trailMax = 260;
     const trailMinMove = 1.1;
     const trailColor = 'rgba(30,136,229,0.65)';
 
-    // Aim: RIGHT index tip（较跟手）
+    // =========================
+    // ✅ 2) 瞄准更严格/更灵敏
+    // =========================
+    // 你原来 followAlpha=0.28，sensitivity=1.15
+    // 更灵敏=更少滞后(增大followAlpha) + 更大位移放大(增大sensitivity)
     let aimX=null, aimY=null;
-    const followAlpha = 0.28;
-    let sensitivity = 1.15;
+    const followAlpha = 0.52;   // ✅ 更跟手（数值越大越“跟”，也更抖）
+    let sensitivity = 1.55;     // ✅ 更灵敏（晃动会被放大）
 
     // Calibration offset
     let calOffX = 0, calOffY = 0;
 
-    // Trigger: LEFT index bend（你指定的参数）
+    // Trigger: LEFT index bend
     const STRAIGHT_DEG = 165;
     const BENT_DEG     = 120;
     const SHOT_COOLDOWN_MS = 450;
@@ -176,53 +247,47 @@
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
-    // ✅ 开局“套准靶心”门槛
-    const LOCK_DIST_PX = 55;
-    const LOCK_FRAMES_NEED = 18;
+    // 开局“套准靶心”门槛
+    const LOCK_DIST_PX = 45;          // ✅ 稍微严格一点（原 55）
+    const LOCK_FRAMES_NEED = 22;      // ✅ 稳定更久（原 18）
     let lockFrames = 0;
 
     // 引导框（仅提示）
-    const guideMargin = 40;
+    const guideMargin = 28;
     function guideRect(){
       const x = guideMargin * DPR;
-      const y = (guideMargin + 90) * DPR;
+      const y = (guideMargin + 70) * DPR;
       const w = W - 2*x;
-      const h = H - y - (guideMargin*DPR + 140*DPR);
+      const h = H - y - (guideMargin*DPR + 120*DPR);
       return {x,y,w:Math.max(0,w),h:Math.max(0,h)};
     }
 
     // =========================
-    // Scoring: 10.9 max
+    // ✅ 3) 更严格计分（并标定：触碰“瞄准器内环”≈7.8）
     // =========================
+    // 说明：ISSF 10m AR 的精确环值需要真实靶纸尺寸、弹孔直径等；你这里是屏幕靶。
+    // 我按你的要求做“标定”：
+    // - d=0 -> 10.9
+    // - d = (sight_inner_black_r * DPR) -> 7.8
+    // - d >= (targetSquareHalf * DPR) -> 0
+    // 中间采用更陡的线性衰减（比你原来的“分环”明显更严格）
     function scoreFromDist(dpx){
-  // 1) 10.0 边界：用你“中心小圆点”的半径当 10环边界
-      const tenRingR = targetDotR * DPR *0.3;          // <= 这个圈内才会出现 10.x
-      const maxR     = targetSquareHalf * DPR;    // 最外（边界）视为 0 分
+      const maxR = targetSquareHalf * DPR;
+      const innerRefR = sight_inner_black_r * DPR; // 你说的“瞄准器内环”
+      const sCenter = 10.9;
+      const sInner  = 7.8;
 
       if(dpx >= maxR) return 0.0;
 
-  // 2) 10环外的每个“整环宽度”
-  // 从 tenRingR 到 maxR 一共 9 个整数环（9到1）
-      const ringStep = (maxR - tenRingR) / 9;
+      // 线性斜率：保证 d=innerRefR 时=7.8
+      const k = (sCenter - sInner) / Math.max(1, innerRefR); // 分/像素
+      let score = sCenter - k * dpx;
 
-      let score;
-      if(dpx <= tenRingR){
-    // 10.9(中心) -> 10.0(十环边界)
-        const t = dpx / tenRingR;                 // 0..1
-        score = 10 + 0.9 * (1 - t);
-      }else{
-        const k = (dpx - tenRingR) / ringStep;    // 0..9
-        const ringIndex = Math.floor(k) + 1;      // 1=>9环, 2=>8环 ... 9=>1环
-        const base = 10 - ringIndex;              // 9..1
-        const f = k - Math.floor(k);              // 0..1，环内位置：内侧->外侧
-        score = base + 0.9 * (1 - f);             // 内侧 base+0.9，外侧 base+0.0
-      }
-
-  // 3) clamp + 四舍五入到 0.1
+      // 超过 maxR 之外直接 0（已经在上面挡了）
       score = Math.max(0, Math.min(10.9, score));
+      // 四舍五入到 0.1
       return Math.round(score * 10) / 10;
     }
-
 
     // score list
     let shotScores = [];
@@ -254,6 +319,7 @@
       return Math.acos(cos) * 180/Math.PI;
     }
 
+    // ✅ 坐标映射：以 leftPane canvas 为坐标系
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
       if(facingMode==='user') x = 1 - x;
@@ -362,7 +428,7 @@
       ctx.stroke();
     }
 
-    // 引导层：只画框+文字，不遮挡靶子
+    // 引导层：只画框+文字
     function drawGuideOverlay(haveLeft, haveRight, locked){
       const r = guideRect();
       ctx.save();
@@ -473,7 +539,6 @@
       flash();
       beep();
 
-      // ✅ 只有“套住靶心稳定”并且成功击发第一枪，才隐藏摄像头进入纯靶子模式
       if(!firstShotDone && lockReady){
         firstShotDone = true;
         bootState = BOOT.PLAY;
@@ -505,7 +570,6 @@
         aimY = ema(aimY, rightTipP.py, followAlpha);
       }
 
-      // 只有 PLAY 后记录轨迹
       if(mode === MODE.READY && bootState === BOOT.PLAY){
         pushTrail(aimX, aimY);
       }
@@ -517,30 +581,25 @@
       const C = mapToScreen(tip.x, tip.y);
       const ang = angleDeg(A.px,A.py, B.px,B.py, C.px,C.py);
 
-// ✅ 允许击发条件：
-// 1) 必须是 READY（不是 CAL）
-// 2) 若已进入 PLAY：随时可击发
-// 3) 若还没进入 PLAY：必须 lockReady=true 才允许“第一枪”击发
-    const allowFire = (mode === MODE.READY) && (bootState === BOOT.PLAY || lockReady);
+      const allowFire = (mode === MODE.READY) && (bootState === BOOT.PLAY || lockReady);
 
-    if(allowFire){
-      if(ang >= STRAIGHT_DEG) leftWasStraight = true;
+      if(allowFire){
+        if(ang >= STRAIGHT_DEG) leftWasStraight = true;
 
-      if(leftWasStraight && ang <= BENT_DEG){
-        bentFrameCount++;
-        if(bentFrameCount >= BENT_FRAMES_NEED){
+        if(leftWasStraight && ang <= BENT_DEG){
+          bentFrameCount++;
+          if(bentFrameCount >= BENT_FRAMES_NEED){
+            bentFrameCount = 0;
+            leftWasStraight = false;
+            fire();
+          }
+        } else {
           bentFrameCount = 0;
-          leftWasStraight = false;
-          fire();
         }
       } else {
+        leftWasStraight = false;
         bentFrameCount = 0;
       }
-    } else {
-      leftWasStraight = false;
-      bentFrameCount = 0;
-    }
-
 
       // Calibration uses RIGHT tip stability
       if(mode === MODE.CAL){
@@ -568,7 +627,6 @@
       }
     }
 
-    // 引导：双手 + 套住靶心稳定 -> 仅允许第一枪（不隐藏）；第一枪成功击发才隐藏
     function updateBootState(haveLeft, haveRight){
       if(bootState === BOOT.PLAY) return;
 
@@ -609,6 +667,9 @@
 
     async function start(){
       statusEl.textContent = '请求摄像头权限…';
+
+      // ✅ resize 一次，确保横竖屏/分屏后 W/H 正确
+      resize();
 
       hands = new Hands({ locateFile: (f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
       hands.setOptions({
@@ -690,6 +751,9 @@
       facingMode = (facingMode==='user') ? 'environment' : 'user';
       try{ camera && camera.stop(); }catch{}
 
+      // ✅ 重新布局尺寸（重要：横屏分屏时）
+      resize();
+
       aimX=aimY=null;
       trail=[];
       calOffX=calOffY=0;
@@ -713,6 +777,7 @@
       await start();
     });
 
+    // 初始启动
     start().catch(err=>{
       console.error(err);
       statusEl.textContent = '启动失败：请在 https 打开并允许摄像头权限';
