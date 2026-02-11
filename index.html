@@ -127,7 +127,7 @@
     let lockReady = false;
 
     // ============================================
-    // ✅ 核心修改：光感枪计分参数（基于像素）
+    // ✅ 光感枪计分参数
     // ============================================
     
     // 靶心参数
@@ -137,11 +137,6 @@
     // 瞄具参数
     const sight_outer_r = 120;      // 瞄具外圈半径
     const sight_inner_r = 44;       // 瞄具内环半径（黑环）
-    const sight_ring_thickness = 7; // 瞄具环线宽度的一半（14/2）
-    
-    // 计分参考点：瞄具内环的**内边缘**半径
-    // 内边缘 = 内环中心半径 - 线宽的一半
-    const sight_scoring_edge_r = sight_inner_r - sight_ring_thickness;
     
     // ============================================
     // ISSF 十米气步枪标准（真实物理尺寸）
@@ -149,25 +144,25 @@
     // - 10环直径 = 0.5mm（半径0.25mm）
     // - 每环宽度 = 2.5mm
     // - 电子靶公式：Score = 10.9 - (r_mm / 2.5)
+    // - 其中 r_mm 是弹丸圆心到靶心的距离（单位：毫米）
     
-    // 光感枪适配方案：
-    // 定义"完美10环"的条件：瞄具内边缘刚好贴住靶心外缘
-    // 此时：瞄准圆心距靶心 = targetDotR + sight_scoring_edge_r
+    // ============================================
+    // 光感枪适配：像素到毫米的换算比例
+    // ============================================
+    // 设定：瞄具内环半径（44px）对应真实的某个距离
+    // 
+    // 合理设置：当瞄准器圆心在内环边缘时，应该对应约 8-9环
+    // 反推：8.5环 → r = (10.9-8.5)*2.5 = 6mm
+    // 所以：44px ≈ 6mm → 1mm ≈ 7.33px
+    // 
+    // 这样设置的效果：
+    // - 瞄准器圆心完美对准靶心（r=0）→ 10.9环
+    // - 瞄准器圆心偏离1mm → 10.5环
+    // - 瞄准器圆心偏离2.5mm → 9.9环
+    // - 瞄准器圆心偏离5mm → 8.9环
+    // - 瞄准器圆心偏离7.5mm → 7.9环
     
-    // 换算比例：设定当瞄具内边缘距离靶心 = X 像素时，对应真实的 Y mm
-    // 我们希望：
-    // - 瞄具内边缘刚好贴住靶心（相切） → 10.0环
-    // - 瞄具内边缘完全包住靶心（靶心在内） → 7-8环
-    
-    // 参考设定：
-    // 假设靶心黑点（22px）对应真实10环区域（直径0.5mm，半径0.25mm）
-    // 那么：22px = 0.25mm，所以 1mm ≈ 88px
-    
-    // 但这样太敏感了，我们需要调整比例，让游戏可玩性更好
-    // 重新设定：假设靶心黑点对应的是视觉上的"10环区域"（直径约5mm）
-    // 那么：22px = 2.5mm（10环半径），所以 1mm ≈ 8.8px
-    
-    const PX_PER_MM = 8.8; // 像素到毫米的转换比例
+    const PX_PER_MM = 7.33; // 像素到毫米的转换比例
 
     // Trail
     let trail = [];
@@ -202,47 +197,27 @@
     let lockFrames = 0;
 
     // ============================================
-    // ✅ 核心修改：光感枪计分算法
-    // 基于瞄具内边缘到靶心的距离计算环数
+    // ✅ 光感枪计分算法（ISSF标准）
+    // 只看瞄准器圆心到靶心圆心的距离
     // ============================================
     function scoreFromAimPos(aimX_px, aimY_px){
-      // 1. 计算瞄准圆心到靶心的距离（像素）
-      const dist_center_px = Math.hypot(aimX_px - cx, aimY_px - cy);
+      // 1. 计算瞄准器圆心到靶心圆心的距离（像素）
+      const dist_px = Math.hypot(aimX_px - cx, aimY_px - cy);
       
-      // 2. 计算瞄具内边缘到靶心外缘的最短距离
-      //    瞄具内边缘半径 = sight_scoring_edge_r
-      //    靶心外缘半径 = targetDotR
-      //    最短距离 = |dist_center - targetDotR| - sight_scoring_edge_r
+      // 2. 转换为毫米
+      const dist_mm = dist_px / (PX_PER_MM * DPR);
       
-      // 如果瞄准圆心距靶心很近：
-      // - dist_center < targetDotR: 瞄准点在靶心内部
-      // - dist_center = targetDotR: 瞄准点刚好在靶心边缘
-      // - dist_center > targetDotR: 瞄准点在靶心外部
+      // 3. ISSF公式：Score = 10.9 - (r_mm / 2.5)
+      //    r_mm = 0 → 10.9环（完美）
+      //    r_mm = 2.5 → 9.9环
+      //    r_mm = 5.0 → 8.9环
+      //    每偏离2.5mm掉1环
+      let score = 10.9 - (dist_mm / 2.5);
       
-      // 瞄具内边缘到靶心圆心的距离
-      const edge_to_bullseye_center = dist_center_px - sight_scoring_edge_r * DPR;
-      
-      // 瞄具内边缘到靶心外缘的间隙（正数=分离，负数=重叠）
-      const gap_px = edge_to_bullseye_center - targetDotR * DPR;
-      
-      // 3. 转换为毫米
-      const gap_mm = gap_px / (PX_PER_MM * DPR);
-      
-      // 4. 计分逻辑：
-      // - gap = 0（刚好相切）: 10.0环
-      // - gap > 0（分离）: 每增加2.5mm掉1环
-      // - gap < 0（重叠）: 每增加2.5mm掉1环
-      
-      // 使用绝对值，因为无论内切还是外切，都是偏离
-      const offset_mm = Math.abs(gap_mm);
-      
-      // ISSF公式变体：Score = 10.0 - (offset / 2.5)
-      let score = 10.0 - (offset_mm / 2.5);
-      
-      // 5. 边界处理
+      // 4. 边界处理（最小0环，最大10.9环）
       score = Math.max(0, Math.min(10.9, score));
       
-      // 6. 保留一位小数
+      // 5. 保留一位小数
       return Math.round(score * 10) / 10;
     }
 
@@ -316,7 +291,7 @@
       ctx.fillRect(x+rOuter, y-barW/2, 20*DPR, barW); // 右耳
 
       // 瞄具内环（计分参考环）
-      ctx.strokeStyle = '#000'; ctx.lineWidth = sight_ring_thickness * 2 * DPR;
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 14*DPR;
       ctx.beginPath(); ctx.arc(x,y, sight_inner_r*DPR, 0, Math.PI*2); ctx.stroke();
     }
 
