@@ -307,8 +307,8 @@ function scoreFromAimPos(aimX_px, aimY_px){
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.font = `${14*DPR}px system-ui,sans-serif`;
       ctx.textBaseline = 'top';
-      ctx.textAlign = 'left'; ctx.fillText('左侧:右手瞄准', r.x+10, r.y+10);
-      ctx.textAlign = 'right'; ctx.fillText('右侧:左手捏合开枪', r.x+r.w-10, r.y+10);
+      ctx.textAlign = 'left'; ctx.fillText('左手手掌瞄准', r.x+10, r.y+10);
+      ctx.textAlign = 'right'; ctx.fillText('右手捏合射击', r.x+r.w-10, r.y+10);
 
       let msg = '';
       if(!haveLeft || !haveRight) msg = '请双手入框（尽量左右分开）';
