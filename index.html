@@ -208,15 +208,43 @@
 
     // Scores (latest on top)
     let shotScores = [];
-    function renderScores(){
-      let out = '';
-      for(let i=shotScores.length-1;i>=0;i--){
-        const idx = i+1;
-        out += `${idx}.  ${shotScores[i].toFixed(1)}\n`;
-      }
-      logEl.textContent = out.trim() || '';
-      logEl.scrollTop = 0;
+   function renderScores(){
+    const n = shotScores.length;
+    if(n === 0){
+      logEl.textContent = '';
+      return;
     }
+
+    let out = '';
+
+  // 按组处理：从最后一组往前走
+    const groups = Math.ceil(n / 10);
+
+    for(let g = groups - 1; g >= 0; g--){
+      const start = g * 10;
+      const end = Math.min(n, start + 10);
+
+    // 计算这一组总分
+      let sum = 0;
+      for(let i = start; i < end; i++){
+        sum += shotScores[i];
+      }
+
+    // 先输出 Total
+      out += `Total(${start+1}-${end}): ${sum.toFixed(1)}\n`;
+
+    // 再倒序输出这一组成绩
+      for(let i = end - 1; i >= start; i--){
+        out += `${i+1}.  ${shotScores[i].toFixed(1)}\n`;
+      }
+
+      out += '\n';
+    }
+
+    logEl.textContent = out.trim();
+    logEl.scrollTop = 0; // 最新仍在最上
+  }
+
 
     // Utils
     const ema = (prev,next,a)=> prev + (next-prev)*a;
