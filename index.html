@@ -220,13 +220,36 @@
       }
     }
 
-    /* ✅ 进入页：只留一个按钮（无外框/无提示语） */
+    /* ✅ 开始页：纯白背景 + 上图下按钮 */
     #startGate{
       position:absolute; inset:0; z-index:30;
-      display:flex; align-items:center; justify-content:center;
-      background:rgba(255,255,255,0.70);
-      -webkit-tap-highlight-color:transparent;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:space-between;
+      background:#fff; /* ✅ 纯白 */
+      padding:18px;
+      padding-top:calc(18px + env(safe-area-inset-top));
+      padding-bottom:calc(18px + env(safe-area-inset-bottom));
+      box-sizing:border-box;
     }
+
+    #gateImgWrap{
+      width:min(920px, 96vw);
+      flex:1 1 auto;
+      min-height:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    #gateImg{
+      display:block;
+      width:100%;
+      height:auto;
+      max-height:100%;
+      object-fit:contain;
+    }
+
     #gateBtn{
       width:240px;
       height:64px;
@@ -245,6 +268,9 @@
       font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       user-select:none;
       -webkit-user-select:none;
+      -webkit-tap-highlight-color:transparent;
+      touch-action:manipulation;
+      flex:0 0 auto;
     }
     #gateBtn .line1{
       font-weight:900;
@@ -296,8 +322,12 @@
         </div>
       </div>
 
-      <!-- ✅ 只一个按钮 -->
+      <!-- ✅ 纯白背景，上面放图，下面按钮 -->
       <div id="startGate">
+        <div id="gateImgWrap">
+          <!-- 把你发的图保存为 start-guide.png 放在同目录 -->
+          <img id="gateImg" src="start-guide.png" alt="左手瞄准，右手击发" />
+        </div>
         <button id="gateBtn">
           <div class="line1">开始射击</div>
           <div class="line2">（可开启声音）</div>
@@ -640,7 +670,7 @@
     }
 
     // ============================================================
-    // ✅【声音系统】更像射击：click + thump + crack + very short slap
+    // ✅【声音系统】更“爆炸/砰”：低频 thump + 大噪声爆裂 + 尾音
     // ============================================================
     let audioCtx = null;
     let audioEnabled = false;
@@ -648,6 +678,8 @@
     let preGain = null;
     let compressor = null;
     let limiter = null;
+
+    // 轻微 slapback（让“砰”更厚一点）
     let slapDelay = null;
     let slapFB = null;
     let slapMix = null;
@@ -661,44 +693,39 @@
       audioCtx = new AC();
 
       preGain = audioCtx.createGain();
-      preGain.gain.setValueAtTime(1.15, audioCtx.currentTime);
+      // ✅ 更像爆炸：整体更大一点
+      preGain.gain.setValueAtTime(1.55, audioCtx.currentTime);
 
       compressor = audioCtx.createDynamicsCompressor();
-      compressor.threshold.setValueAtTime(-20, audioCtx.currentTime);
-      compressor.knee.setValueAtTime(18, audioCtx.currentTime);
-      compressor.ratio.setValueAtTime(8, audioCtx.currentTime);
+      compressor.threshold.setValueAtTime(-22, audioCtx.currentTime);
+      compressor.knee.setValueAtTime(16, audioCtx.currentTime);
+      compressor.ratio.setValueAtTime(10, audioCtx.currentTime);
       compressor.attack.setValueAtTime(0.002, audioCtx.currentTime);
-      compressor.release.setValueAtTime(0.12, audioCtx.currentTime);
+      compressor.release.setValueAtTime(0.16, audioCtx.currentTime);
 
       limiter = audioCtx.createDynamicsCompressor();
-      limiter.threshold.setValueAtTime(-1.2, audioCtx.currentTime);
+      limiter.threshold.setValueAtTime(-1.1, audioCtx.currentTime);
       limiter.knee.setValueAtTime(0, audioCtx.currentTime);
       limiter.ratio.setValueAtTime(20, audioCtx.currentTime);
       limiter.attack.setValueAtTime(0.001, audioCtx.currentTime);
       limiter.release.setValueAtTime(0.08, audioCtx.currentTime);
 
-      // 极短 slapback（增强“啪”的真实感，保持很轻）
-      slapDelay = audioCtx.createDelay(0.08);
-      slapDelay.delayTime.setValueAtTime(0.028, audioCtx.currentTime);
-
+      // slapback：极轻
+      slapDelay = audioCtx.createDelay(0.10);
+      slapDelay.delayTime.setValueAtTime(0.030, audioCtx.currentTime);
       slapFB = audioCtx.createGain();
-      slapFB.gain.setValueAtTime(0.12, audioCtx.currentTime);
-
+      slapFB.gain.setValueAtTime(0.18, audioCtx.currentTime);
       slapMix = audioCtx.createGain();
-      slapMix.gain.setValueAtTime(0.18, audioCtx.currentTime);
+      slapMix.gain.setValueAtTime(0.22, audioCtx.currentTime);
 
-      // wet chain: preGain -> delay -> mix -> compressor
       preGain.connect(slapDelay);
       slapDelay.connect(slapMix);
       slapMix.connect(compressor);
 
-      // feedback: delay -> fb -> delay
       slapDelay.connect(slapFB);
       slapFB.connect(slapDelay);
 
-      // dry: preGain -> compressor
       preGain.connect(compressor);
-
       compressor.connect(limiter);
       limiter.connect(audioCtx.destination);
 
@@ -717,7 +744,7 @@
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.type = 'sine';
-        o.frequency.setValueAtTime(50, t);
+        o.frequency.setValueAtTime(40, t);
         g.gain.setValueAtTime(0.00001, t);
         o.connect(g); g.connect(preGain);
         o.start(t);
@@ -732,98 +759,79 @@
       const data = buf.getChannelData(0);
       for(let i=0;i<n;i++){
         const x = i / n;
-        // 前段更硬，快速衰减：更像“啪”
-        const e = Math.pow(1 - x, 2.6);
-        const hard = (x < 0.018) ? 1.9 : 1.0;
-        data[i] = (Math.random()*2-1) * e * hard;
+        // ✅ 更像“爆”：前 10~20ms 更猛，然后衰减
+        const e = Math.pow(1 - x, 2.15);
+        const punch = (x < 0.020) ? 2.25 : 1.0;
+        data[i] = (Math.random()*2-1) * e * punch;
       }
       return buf;
     }
 
-    // ✅ 替换你原来的 beep(): 现在更像射击
+    // ✅ 更爆炸的击发音
     function beep(){
       if(!audioEnabled || !audioCtx || !preGain) return;
-
       const ctx = audioCtx;
       const t0 = ctx.currentTime;
 
-      // 0) 微小随机，避免每枪完全一样
-      const jitter = (Math.random() * 0.004);
-
-      // 1) 机械击发 click（极短、尖、硬）
-      try{
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = 'square';
-        o.frequency.setValueAtTime(3200, t0);
-        o.frequency.exponentialRampToValueAtTime(900, t0 + 0.012 + jitter);
-        g.gain.setValueAtTime(0.0001, t0);
-        g.gain.linearRampToValueAtTime(1.0, t0 + 0.0015);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.020 + jitter);
-        o.connect(g); g.connect(preGain);
-        o.start(t0);
-        o.stop(t0 + 0.03);
-      }catch{}
-
-      // 2) 低频 thump（“砰”的身体感）
+      // 1) 低频 thump（更像“砰”）
       try{
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.type = 'sine';
-        o.frequency.setValueAtTime(95, t0);
-        o.frequency.exponentialRampToValueAtTime(55, t0 + 0.10);
+        o.frequency.setValueAtTime(78, t0);
+        o.frequency.exponentialRampToValueAtTime(42, t0 + 0.16);
         g.gain.setValueAtTime(0.0001, t0);
-        g.gain.linearRampToValueAtTime(0.70, t0 + 0.006);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+        g.gain.linearRampToValueAtTime(1.05, t0 + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
         o.connect(g); g.connect(preGain);
         o.start(t0);
-        o.stop(t0 + 0.16);
+        o.stop(t0 + 0.26);
       }catch{}
 
-      // 3) crack（高频噪声+带通，让“啪”更像枪口冲击）
+      // 2) 爆裂主体：噪声 + 低通下扫（更像“轰”）
       try{
-        const dur = 0.065;
-        const src = ctx.createBufferSource();
-        src.buffer = makeNoiseBuffer(dur);
-
-        const hp = ctx.createBiquadFilter();
-        hp.type = 'highpass';
-        hp.frequency.setValueAtTime(1200, t0);
-
-        const bp = ctx.createBiquadFilter();
-        bp.type = 'bandpass';
-        bp.frequency.setValueAtTime(3300, t0);
-        bp.Q.setValueAtTime(7.5, t0);
-
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(0.0001, t0);
-        g.gain.linearRampToValueAtTime(1.0, t0 + 0.004);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-
-        src.connect(hp); hp.connect(bp); bp.connect(g); g.connect(preGain);
-        src.start(t0);
-        src.stop(t0 + dur + 0.02);
-      }catch{}
-
-      // 4) 轻微“空气喷射尾音”（更像气动的“嗤”）
-      try{
-        const dur = 0.10;
+        const dur = 0.32; // ✅ 尾音更长一点点
         const src = ctx.createBufferSource();
         src.buffer = makeNoiseBuffer(dur);
 
         const lp = ctx.createBiquadFilter();
         lp.type = 'lowpass';
-        lp.frequency.setValueAtTime(1400, t0);
-        lp.frequency.exponentialRampToValueAtTime(600, t0 + dur);
+        lp.frequency.setValueAtTime(4200, t0);
+        lp.frequency.exponentialRampToValueAtTime(700, t0 + dur);
 
         const g = ctx.createGain();
-        g.gain.setValueAtTime(0.0001, t0 + 0.010);
-        g.gain.linearRampToValueAtTime(0.22, t0 + 0.020);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.linearRampToValueAtTime(1.15, t0 + 0.006);
         g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
         src.connect(lp); lp.connect(g); g.connect(preGain);
-        src.start(t0 + 0.010);
+        src.start(t0);
         src.stop(t0 + dur + 0.03);
+      }catch{}
+
+      // 3) 高频 crack：带通短促一刀（让“爆”更炸）
+      try{
+        const dur = 0.08;
+        const src = ctx.createBufferSource();
+        src.buffer = makeNoiseBuffer(dur);
+
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.setValueAtTime(1400, t0);
+
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.setValueAtTime(3200, t0);
+        bp.Q.setValueAtTime(8.0, t0);
+
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.linearRampToValueAtTime(0.95, t0 + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+        src.connect(hp); hp.connect(bp); bp.connect(g); g.connect(preGain);
+        src.start(t0);
+        src.stop(t0 + dur + 0.02);
       }catch{}
     }
 
@@ -1240,40 +1248,6 @@ triggerLocked: ${triggerLocked}
       await camera.start();
       await ensureVideoPlays();
     }
-
-    // Share preview events
-    function openSharePreview(blob){
-      if(spBlobUrl){
-        URL.revokeObjectURL(spBlobUrl);
-        spBlobUrl = null;
-      }
-      spBlobUrl = URL.createObjectURL(blob);
-      spDownloadName = `finger-rifle-${Date.now()}.png`;
-
-      spImg.src = spBlobUrl;
-      sharePreview.classList.add('show');
-      sharePreview.setAttribute('aria-hidden','false');
-    }
-    function closeSharePreview(){
-      sharePreview.classList.remove('show');
-      sharePreview.setAttribute('aria-hidden','true');
-
-      if(spBlobUrl){
-        URL.revokeObjectURL(spBlobUrl);
-        spBlobUrl = null;
-      }
-      spImg.src = '';
-    }
-    spClose.addEventListener('click', closeSharePreview);
-    spBack.addEventListener('click', closeSharePreview);
-    sharePreview.querySelector('.sp-backdrop').addEventListener('click', closeSharePreview);
-    spDownload.addEventListener('click', ()=>{
-      if(!spBlobUrl) return;
-      const a = document.createElement('a');
-      a.href = spBlobUrl;
-      a.download = spDownloadName || `finger-rifle-${Date.now()}.png`;
-      a.click();
-    });
 
     // ✅ 必须先点击按钮解锁音频，再启动摄像头/游戏
     gateBtn.addEventListener('click', async ()=>{
