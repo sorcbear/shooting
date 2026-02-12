@@ -9,13 +9,6 @@
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
     #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
-
-    /* ✅ 防止 iOS/移动端点按闪烁/高亮 */
-    *{ -webkit-tap-highlight-color: transparent; }
-    button{ outline:none; }
-    button:focus{ outline:none; }
-    button::-moz-focus-inner{ border:0; }
-
     #leftPane{
       position:relative; flex:0 0 66.6667%; min-height:0;
       background:#fff; overflow:hidden;
@@ -137,24 +130,14 @@
       opacity:0.88;
     }
 
-    /* ✅ 分享预览层：用 opacity/visibility 替代 display 切换，杜绝“黑线瞬闪” */
-    #sharePreview{
-      position:absolute; inset:0; z-index:20;
-      opacity:0; visibility:hidden; pointer-events:none;
-      transition:opacity 120ms linear, visibility 0ms linear 120ms;
-      transform: translateZ(0);
-      backface-visibility:hidden;
-    }
-    #sharePreview.show{
-      opacity:1; visibility:visible; pointer-events:auto;
-      transition:opacity 120ms linear, visibility 0ms;
-    }
+    /* 分享预览层（白底黑字，横屏不裁按钮） */
+    #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
+    #sharePreview.show{ display:block; }
     #sharePreview .sp-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.55); }
 
     #sharePreview .sp-panel{
       position:absolute; left:50%; top:50%;
-      transform:translate(-50%,-50%) translateZ(0);
-      backface-visibility:hidden;
+      transform:translate(-50%,-50%);
       width:min(92vw, 860px);
       max-height:92vh;
       background:#fff; color:#000;
@@ -237,26 +220,41 @@
       }
     }
 
-    /* ✅ 进入页面先点“开始射击”（用来解锁摄像头+音频） */
+    /* ✅【新增】进入页解锁音频按钮（白底黑框黑字） */
     #startGate{
-      position:absolute; inset:0; z-index:50;
+      position:absolute; inset:0; z-index:30;
       display:flex; align-items:center; justify-content:center;
-      background:rgba(255,255,255,0.92);
-      padding:24px;
-      box-sizing:border-box;
+      background:rgba(255,255,255,0.86);
+      backdrop-filter:saturate(120%) blur(2px);
     }
-    #startBtn{
-      appearance:none;
-      border-radius:0;
-      padding:14px 18px;
-      font:900 18px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    #startGate .gateInner{
+      display:flex; flex-direction:column; align-items:center; gap:10px;
+      padding:18px 18px 16px;
       background:#fff;
       border:2px solid #000;
-      color:#000;
-      cursor:pointer;
-      box-shadow:0 8px 22px rgba(0,0,0,0.22);
+      border-radius:0;
+      box-shadow:0 8px 20px rgba(0,0,0,0.18);
+      width:min(92vw, 360px);
+      box-sizing:border-box;
     }
-    #startBtn:active{ transform:translateY(1px); }
+    #startGate button{
+      width:240px;
+      height:48px;
+      border-radius:0;
+      border:2px solid #000;
+      background:#fff;
+      color:#000;
+      font:800 16px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+    }
+    #startGate button:hover{ background:#000; color:#fff; }
+    #startGate .gateHint{
+      font:600 13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:#111;
+      opacity:0.75;
+      text-align:center;
+    }
   </style>
 </head>
 
@@ -294,8 +292,12 @@
         </div>
       </div>
 
+      <!-- ✅【新增】音频解锁门 -->
       <div id="startGate">
-        <button id="startBtn">开始射击</button>
+        <div class="gateInner">
+          <button id="gateBtn">开始射击（开启声音）</button>
+          <div class="gateHint">请先打开手机音量/关闭静音，再点击开始</div>
+        </div>
       </div>
     </div>
 
@@ -329,10 +331,6 @@
     const celeTitle = document.getElementById('celeTitle');
     const celeSub = document.getElementById('celeSub');
 
-    // Start gate
-    const startGate = document.getElementById('startGate');
-    const startBtn = document.getElementById('startBtn');
-
     // Share preview DOM
     const sharePreview = document.getElementById('sharePreview');
     const spImg = document.getElementById('spImg');
@@ -341,6 +339,10 @@
     const spDownload = document.getElementById('spDownload');
     let spBlobUrl = null;
     let spDownloadName = '';
+
+    // ✅【新增】音频解锁门 DOM
+    const startGate = document.getElementById('startGate');
+    const gateBtn = document.getElementById('gateBtn');
 
     // Debug
     const DEBUG_MODE = false;
@@ -562,6 +564,7 @@
       ctx.stroke();
     }
 
+    // ✅ 只在“看不见准星/没有双手/视频未就绪”时显示提示
     function drawGuideOverlay(haveLeft, haveRight, haveSight){
       const half = targetSquareHalf * DPR;
       const boxY = cy - half;
@@ -633,139 +636,129 @@
       drawGuideOverlay(haveLeft, haveRight, haveSight);
     }
 
-    // =====================================================
-    // ✅ 音频：WebAudio + HTMLAudio 双通道，确保不再“完全没声”
-    // =====================================================
+    // ============================================================
+    // ✅【声音系统】借鉴你能响的页面：单例 AudioContext + resume 解锁
+    // ============================================================
+    let audioCtx = null;
+    let audioEnabled = false;
 
-    // 1) WebAudio（保留）
-    let _shotAC = null;
-    function audioUnlockWebAudio(){
+    // 为了更像“十米气步枪击发”，加一个 master chain（轻微压缩/限幅）
+    let preGain = null;
+    let limiter = null;
+
+    function ensureAudio(){
+      if(audioCtx) return audioCtx;
+
       const AC = (window.AudioContext || window.webkitAudioContext);
-      if(!AC) return;
-      if(!_shotAC) _shotAC = new AC();
-      if(_shotAC.state === 'suspended'){
-        _shotAC.resume().catch(()=>{});
-      }
-      // 极短确认音
+      if(!AC) return null;
+
+      audioCtx = new AC();
+
+      preGain = audioCtx.createGain();
+      preGain.gain.setValueAtTime(1.0, audioCtx.currentTime);
+
+      limiter = audioCtx.createDynamicsCompressor();
+      limiter.threshold.setValueAtTime(-1.2, audioCtx.currentTime);
+      limiter.knee.setValueAtTime(0, audioCtx.currentTime);
+      limiter.ratio.setValueAtTime(20, audioCtx.currentTime);
+      limiter.attack.setValueAtTime(0.001, audioCtx.currentTime);
+      limiter.release.setValueAtTime(0.08, audioCtx.currentTime);
+
+      preGain.connect(limiter);
+      limiter.connect(audioCtx.destination);
+
+      return audioCtx;
+    }
+
+    async function enableAudio(){
+      const ctx = ensureAudio();
+      if(!ctx) throw new Error('NoAudioContext');
+      if(ctx.state === 'suspended') await ctx.resume();
+      audioEnabled = true;
+
+      // 轻微“静音脉冲”确保 iOS 真正挂上输出（常用技巧）
       try{
-        const ac = _shotAC;
-        const t0 = ac.currentTime;
-        const o = ac.createOscillator();
-        const g = ac.createGain();
+        const t = ctx.currentTime;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(60, t);
+        g.gain.setValueAtTime(0.00001, t);
+        o.connect(g); g.connect(preGain);
+        o.start(t);
+        o.stop(t + 0.03);
+      }catch{}
+    }
+
+    // ✅ 替换你原来的 beep(): 变成“击发声”
+    function beep(){
+      if(!audioEnabled || !audioCtx || !preGain) return;
+
+      const ctx = audioCtx;
+      const t0 = ctx.currentTime;
+
+      // 1) 金属击发 click（很短，偏高频）
+      try{
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
         o.type = 'square';
-        o.frequency.setValueAtTime(1200, t0);
+        o.frequency.setValueAtTime(2200, t0);
+        o.frequency.exponentialRampToValueAtTime(800, t0 + 0.018);
         g.gain.setValueAtTime(0.0001, t0);
-        g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.002);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.030);
-        o.connect(g); g.connect(ac.destination);
+        g.gain.linearRampToValueAtTime(0.9, t0 + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.03);
+        o.connect(g); g.connect(preGain);
         o.start(t0);
-        o.stop(t0 + 0.035);
+        o.stop(t0 + 0.04);
       }catch{}
-    }
-    function rifleShotSoundWebAudio(){
+
+      // 2) 低频 thump（气动/枪体“砰”的感觉）
       try{
-        if(!_shotAC) return;
-        const ac = _shotAC;
-        if(ac.state === 'suspended'){
-          ac.resume().catch(()=>{});
-        }
-        const t0 = ac.currentTime;
-
-        const master = ac.createGain();
-        master.gain.setValueAtTime(0.0001, t0);
-        master.gain.exponentialRampToValueAtTime(0.60, t0 + 0.004);
-        master.gain.exponentialRampToValueAtTime(0.05, t0 + 0.045);
-        master.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.140);
-        master.connect(ac.destination);
-
-        const noiseDur = 0.16;
-        const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * noiseDur), ac.sampleRate);
-        const ch = noiseBuf.getChannelData(0);
-        for(let i=0;i<ch.length;i++){
-          const env = 1 - (i / ch.length);
-          ch[i] = (Math.random()*2 - 1) * env;
-        }
-        const noise = ac.createBufferSource();
-        noise.buffer = noiseBuf;
-
-        const noiseBP = ac.createBiquadFilter();
-        noiseBP.type = 'bandpass';
-        noiseBP.frequency.setValueAtTime(2000, t0);
-        noiseBP.Q.setValueAtTime(0.8, t0);
-
-        const noiseHP = ac.createBiquadFilter();
-        noiseHP.type = 'highpass';
-        noiseHP.frequency.setValueAtTime(450, t0);
-
-        const noiseGain = ac.createGain();
-        noiseGain.gain.setValueAtTime(1.2, t0);
-        noiseGain.gain.exponentialRampToValueAtTime(0.10, t0 + 0.07);
-        noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
-
-        noise.connect(noiseBP);
-        noiseBP.connect(noiseHP);
-        noiseHP.connect(noiseGain);
-        noiseGain.connect(master);
-
-        const thump = ac.createOscillator();
-        thump.type = 'sine';
-        thump.frequency.setValueAtTime(170, t0);
-        thump.frequency.exponentialRampToValueAtTime(80, t0 + 0.06);
-
-        const thumpGain = ac.createGain();
-        thumpGain.gain.setValueAtTime(0.0001, t0);
-        thumpGain.gain.exponentialRampToValueAtTime(0.35, t0 + 0.003);
-        thumpGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.10);
-
-        thump.connect(thumpGain);
-        thumpGain.connect(master);
-
-        noise.start(t0);
-        noise.stop(t0 + noiseDur);
-        thump.start(t0);
-        thump.stop(t0 + 0.11);
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(120, t0);
+        o.frequency.exponentialRampToValueAtTime(70, t0 + 0.08);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.linearRampToValueAtTime(0.55, t0 + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+        o.connect(g); g.connect(preGain);
+        o.start(t0);
+        o.stop(t0 + 0.13);
       }catch{}
-    }
 
-    // 2) HTMLAudio（兜底，更容易在 iOS 成功）
-    // 内置一个很短的“枪声” wav
-    const SHOT_WAV_DATAURI =
-      "data:audio/wav;base64," +
-      "UklGRoQGAABXQVZFZm10IBAAAAABAAEAWF4AAAB9AAACABAAZGF0YVAGAAAAAAEABQALABIAHwApADUAPwBGAE0AUgBVAFAARwA6ACoAFwADAPn/7v/h/9L/xf+4/6T/m/+a/5z/oP+f/6P/pP+f/5L/hf95/2n/XP9S/0z/S/9S/2D/cf+G/5//uf/U/+n//v8WAC0ARgBeAHgAjwCkALkAyADSAOAA5gDvAPMA8wDwAOoA4ADTAOIAuACpAJcAggBtAFkARgA0ACMAEgAFAAUADQAcAC8ARgBiAH8AnAC3AM0A2gDoAPAA8wDzAO8A5wDbAMsAugClAJAAegBmAFEAOwApABsAEQAOABEAHAArAD8AVwBwAIgAogC6AM0A3ADoAPAA8wDyAO4A5gDaAMoAugCkAI8AegBkAE4AOAAkABUACwAIAAsAEgAfADMAQwBbAHQAjwCmAL0AzgDbAOgA8AAzAPEA7wDnANoAywC6AKUAlwCBAOkAZQBTAEIAKgAYAA0ABQAFAAsAFgAjADoAUgBtAIgAowC7AM0A3gDrAPMA9gD1APEA6gDfANAAuwCmAJEAfABoAFMADgA0ACQAFwAPAA0ADwAVAB8ALwBEAF4AeQCUAKwAwQDSAN8A7wD3APoA+QD1AO8A5gDZAMoAugClAJAAegBlAFEAOwApABoADwAKAAoADgAWACMAOwBSAG0AiQCkALsAzQDcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIA";
-
-    let shotAudioBase = null;
-
-    function audioUnlockHtmlAudio(){
+      // 3) 短噪声 snap（空气喷射/机械摩擦的“啪”）
       try{
-        if(!shotAudioBase){
-          shotAudioBase = new Audio(SHOT_WAV_DATAURI);
-          shotAudioBase.preload = 'auto';
-          shotAudioBase.volume = 1.0;
+        const dur = 0.11;
+        const n = Math.floor(ctx.sampleRate * dur);
+        const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for(let i=0;i<n;i++){
+          const x = i/n;
+          // 前面强，快速衰减
+          data[i] = (Math.random()*2-1) * (1 - x) * (x < 0.03 ? 1.4 : 0.9);
         }
-        // 关键：在用户手势里 play 一下再 pause，解锁权限
-        const p = shotAudioBase.play();
-        if(p && typeof p.then === 'function'){
-          p.then(()=>{
-            shotAudioBase.pause();
-            shotAudioBase.currentTime = 0;
-          }).catch(()=>{});
-        }else{
-          // 旧浏览器
-          setTimeout(()=>{
-            try{ shotAudioBase.pause(); shotAudioBase.currentTime=0; }catch{}
-          }, 20);
-        }
-      }catch{}
-    }
 
-    function rifleShotSoundHtmlAudio(){
-      try{
-        if(!shotAudioBase) return;
-        const a = shotAudioBase.cloneNode(true);
-        a.volume = 1.0;
-        // 不要 await，避免丢失手势链
-        const p = a.play();
-        if(p && typeof p.catch === 'function') p.catch(()=>{});
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.setValueAtTime(900, t0);
+
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.setValueAtTime(2300, t0);
+        bp.Q.setValueAtTime(5.5, t0);
+
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.linearRampToValueAtTime(0.65, t0 + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+        src.connect(hp); hp.connect(bp); bp.connect(g); g.connect(preGain);
+        src.start(t0);
+        src.stop(t0 + dur + 0.02);
       }catch{}
     }
 
@@ -931,9 +924,8 @@
       flashEl.style.opacity='1';
       setTimeout(()=>flashEl.style.opacity='0',80);
 
-      // ✅ 每枪音效：优先 HTMLAudio（更稳定），WebAudio 作为备用
-      rifleShotSoundHtmlAudio();
-      rifleShotSoundWebAudio();
+      // ✅ 每枪击发音效（现在用单例 AudioContext，iPhone 更稳）
+      beep();
 
       if(isCalibrationShot){
         firstShotDone = true;
@@ -963,11 +955,13 @@
       return -1;
     }
 
+    // ✅ 校准后允许在任何位置击发：processFrame 不再被 lockReady 卡死
     function processFrame(leftLm, rightLm){
       const now = Date.now();
       if(now < freezeUntil) return;
       if(!videoReady) return;
 
+      // right hand aim (need right hand landmarks)
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
@@ -977,6 +971,7 @@
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
+      // Left pinch
       const lThumb = leftLm[4];
       const lIndex = leftLm[8];
       const wrist  = leftLm[0];
@@ -1000,6 +995,7 @@ triggerLocked: ${triggerLocked}
         `.trim();
       }
 
+      // ✅ 只有“校准前”才要求 lockReady
       if(!firstShotDone && !lockReady){
         isPinched = false;
         triggerLocked = false;
@@ -1049,6 +1045,7 @@ triggerLocked: ${triggerLocked}
       }
     }
 
+    // ✅ 校准前需要锁靶心；校准后：只要有准星就 PLAY
     function updateLockState(haveLeft, haveRight, haveSight){
       if(!videoReady){
         lockFrames = 0;
@@ -1060,13 +1057,14 @@ triggerLocked: ${triggerLocked}
         return;
       }
 
+      // 丢手：回到等待
       if(!haveLeft || !haveRight || !haveSight){
         lockFrames = 0;
         lockReady = false;
 
         if(firstShotDone){
           mode = MODE.PLAY;
-          statusEl.textContent = 'READY ✅';
+          statusEl.textContent = 'READY ✅';    
         }else{
           mode = MODE.WAIT_BOTH;
           statusEl.textContent = '等待双手...';
@@ -1079,6 +1077,7 @@ triggerLocked: ${triggerLocked}
         return;
       }
 
+      // 有双手+准星
       if(firstShotDone){
         mode = MODE.PLAY;
         lockReady = true;
@@ -1087,6 +1086,7 @@ triggerLocked: ${triggerLocked}
         return;
       }
 
+      // 校准前：仍然要锁靶心
       const d = Math.hypot(aimX-cx, aimY-cy);
       const locked = d <= (LOCK_DIST_PX * DPR);
       if(locked) lockFrames++; else lockFrames=0;
@@ -1121,6 +1121,7 @@ triggerLocked: ${triggerLocked}
       statusEl.textContent = '请求摄像头...';
       resizeTwice();
 
+      // ✅ 先画一个靶子，避免任何初始化延迟导致“黑屏无内容”
       render(false,false,false);
 
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
@@ -1185,25 +1186,30 @@ triggerLocked: ${triggerLocked}
       await ensureVideoPlays();
     }
 
-    function startFromGate(){
-      // ✅ 必须在用户手势回调里同步解锁音频
-      audioUnlockWebAudio();
-      audioUnlockHtmlAudio();
-
+    // ✅【新增】必须先点击 gate 解锁音频，再启动摄像头/游戏
+    gateBtn.addEventListener('click', async ()=>{
+      gateBtn.disabled = true;
+      try{
+        await enableAudio();
+      }catch(e){
+        console.error('enableAudio failed:', e);
+        // 这里不改你其它逻辑：只提示一下并允许重试
+        statusEl.textContent = '声音开启失败（请用Safari/关闭静音）';
+        gateBtn.disabled = false;
+        return;
+      }
       startGate.style.display = 'none';
 
       start().catch(e=>{
         console.error(e);
         statusEl.textContent='启动失败: 请检查摄像头权限或HTTPS连接';
         render(false,false,false);
-        startGate.style.display = 'flex';
       });
-    }
+    });
 
+    // ✅ 初始态：不自动 start()，等用户点 gate
     render(false,false,false);
-    statusEl.textContent = '点击“开始射击”';
-
-    startBtn.addEventListener('click', startFromGate);
+    statusEl.textContent = '点击“开始射击”以开启声音';
   </script>
 </body>
 </html>
