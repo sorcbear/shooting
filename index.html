@@ -76,18 +76,27 @@
     /* 分享按钮 */
     #shareBtn{
       position:absolute; bottom:16px; right:16px; z-index:4;
-      background:#007AFF; color:#fff;
-      border:none; border-radius:12px;
+      background:#000; color:#fff;
+      border:none; border-radius:0; /* 直角边 */
       padding:12px 24px; font-size:16px; font-weight:600;
-      cursor:pointer; box-shadow:0 4px 12px rgba(0,122,255,0.3);
+      cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.3);
       transition:all 0.2s;
+      display:flex; align-items:center; gap:8px;
     }
     #shareBtn:hover{
-      background:#0051D5; transform:translateY(-2px);
-      box-shadow:0 6px 16px rgba(0,122,255,0.4);
+      background:#222; transform:translateY(-2px);
+      box-shadow:0 6px 16px rgba(0,0,0,0.4);
     }
     #shareBtn:active{
       transform:translateY(0);
+    }
+    #shareBtn::before{
+      content:'';
+      display:inline-block;
+      width:20px; height:20px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8'/%3E%3Cpolyline points='16 6 12 2 8 6'/%3E%3Cline x1='12' y1='2' x2='12' y2='15'/%3E%3C/svg%3E");
+      background-size:contain;
+      background-repeat:no-repeat;
     }
     /* 奥运庆祝画面 */
     #celebration{
@@ -146,7 +155,7 @@
       <canvas id="cv"></canvas>
       <div id="flash"></div>
       <div id="debugInfo"></div>
-      <button id="shareBtn">📸 分享成绩</button>
+      <button id="shareBtn">分享成绩</button>
       
       <!-- 奥运庆祝画面 -->
       <div id="celebration">
@@ -529,11 +538,8 @@
         shareCanvas.width = width;
         shareCanvas.height = height;
 
-        // 背景渐变
-        const gradient = shareCtx.createLinearGradient(0, 0, 0, height);
-        gradient.addColorStop(0, '#667eea');
-        gradient.addColorStop(1, '#764ba2');
-        shareCtx.fillStyle = gradient;
+        // ✅ 纯黑色背景
+        shareCtx.fillStyle = '#000';
         shareCtx.fillRect(0, 0, width, height);
 
         // 标题
@@ -571,14 +577,42 @@
             shareCtx.fillText(`最近10发总分: ${recentSum.toFixed(1)}`, 150, y);
             y += 50;
             
-            if(recentSum >= 105){
-              shareCtx.fillStyle = '#FFD700';
-              shareCtx.font = 'bold 48px system-ui';
-              shareCtx.fillText('🏆 奥运选手级别！', 150, y);
-              shareCtx.fillStyle = '#333';
-              shareCtx.font = 'bold 32px system-ui';
-              y += 60;
+            // ✅ 根据分数显示评价
+            let comment = '';
+            let commentColor = '#333';
+            
+            if(recentSum < 90){
+              comment = '没什么天赋';
+              commentColor = '#999';
+            }else if(recentSum < 97){
+              comment = '有点菜了';
+              commentColor = '#FF6B6B';
+            }else if(recentSum < 100){
+              comment = '一般般';
+              commentColor = '#FFA500';
+            }else if(recentSum < 102){
+              comment = '有点厉害';
+              commentColor = '#4ECDC4';
+            }else if(recentSum < 105){
+              comment = '有望冲击奥运';
+              commentColor = '#45B7D1';
+            }else if(recentSum < 106){
+              comment = '🏆 奥运选手！';
+              commentColor = '#FFD700';
+            }else if(recentSum < 109){
+              comment = '🏆 奥运冠军';
+              commentColor = '#FFD700';
+            }else{
+              comment = '🏆 奥运冠军';
+              commentColor = '#FFD700';
             }
+            
+            shareCtx.fillStyle = commentColor;
+            shareCtx.font = 'bold 48px system-ui';
+            shareCtx.fillText(comment, 150, y);
+            shareCtx.fillStyle = '#333';
+            shareCtx.font = 'bold 32px system-ui';
+            y += 60;
           }
 
           // 平均分
