@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="format-detection" content="telephone=no,address=no,email=no">
-  <title>Air Finger Rifle - ISSF Edition (光感枪)</title>
+  <title>Air Finger Rifle - ISSF Edition (光感枪 - 优化版)</title>
 
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
     #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
     #leftPane{
       position:relative; flex:0 0 66.6667%; min-height:0;
-      background:#fff; overflow:hidden;               /* ✅ 射击背景纯白 */
+      background:#fff; overflow:hidden;
     }
     #rightPane{
       position:relative; flex:0 0 33.3333%; min-height:0;
@@ -28,14 +28,13 @@
       }
     }
 
-    /* ✅ iOS 合成层稳定 */
     #video{
       position:absolute; inset:0; width:100%; height:100%;
       object-fit:cover; transform:scaleX(-1) translateZ(0);
       will-change: transform;
       backface-visibility: hidden;
       z-index:0;
-      background:#000; opacity:1; transition:opacity 120ms linear; /* 摄像头阶段可黑底 */
+      background:#000; opacity:1; transition:opacity 120ms linear;
     }
     #cv{
       position:absolute; inset:0; width:100%; height:100%;
@@ -65,6 +64,15 @@
       background:#fff; opacity:0; pointer-events:none;
       transition:opacity 80ms linear;
     }
+    /* 调试信息显示 */
+    #debugInfo{
+      position:absolute; top:10px; left:10px; z-index:3;
+      font:11px/1.3 ui-monospace,monospace;
+      color:#000; background:rgba(255,255,255,0.9);
+      border:1px solid #999; border-radius:6px;
+      padding:8px; max-width:200px;
+      display:none; /* 默认隐藏，可通过JS开启 */
+    }
   </style>
 </head>
 
@@ -74,11 +82,12 @@
       <video id="video" playsinline muted></video>
       <canvas id="cv"></canvas>
       <div id="flash"></div>
+      <div id="debugInfo"></div>
     </div>
 
     <div id="rightPane">
       <div id="hud">
-        <div><b>Finger Rifle</b> <span class="muted">右手食指瞄准 · 左手【完全捏合】开火</span></div>
+        <div><b>Finger Rifle (优化版)</b> <span class="muted">右手食指瞄准 · 左手【完全捏合】开火</span></div>
         <span id="status" class="pill">初始化…</span>
         <span class="muted" id="hint"></span>
       </div>
@@ -99,6 +108,11 @@
     const logEl = document.getElementById('log');
     const flashEl = document.getElementById('flash');
     const hintEl = document.getElementById('hint');
+    const debugInfo = document.getElementById('debugInfo');
+
+    // 调试模式开关（改为true可显示实时捏合数据）
+    const DEBUG_MODE = false;
+    if(DEBUG_MODE) debugInfo.style.display = 'block';
 
     // Canvas size
     let W=0,H=0,DPR=1,cx=0,cy=0;
@@ -206,52 +220,46 @@
       return Math.round(score * 10) / 10;
     }
 
-    // Scores (latest on top)
+    // Scores
     let shotScores = [];
-   function renderScores(){
-    const n = shotScores.length;
-    if(n === 0){
-      logEl.textContent = '';
-      return;
-    }
-
-    let out = '';
-
-  // 按组处理：从最后一组往前走
-    const groups = Math.ceil(n / 10);
-
-    for(let g = groups - 1; g >= 0; g--){
-      const start = g * 10;
-      const end = Math.min(n, start + 10);
-
-    // 计算这一组总分
-      let sum = 0;
-      for(let i = start; i < end; i++){
-        sum += shotScores[i];
+    function renderScores(){
+      const n = shotScores.length;
+      if(n === 0){
+        logEl.textContent = '';
+        return;
       }
 
-    // 先输出 Total
-      out += `Total(${start+1}-${end}): ${sum.toFixed(1)}\n`;
+      let out = '';
+      const groups = Math.ceil(n / 10);
 
-    // 再倒序输出这一组成绩
-      for(let i = end - 1; i >= start; i--){
-        out += `${i+1}.  ${shotScores[i].toFixed(1)}\n`;
+      for(let g = groups - 1; g >= 0; g--){
+        const start = g * 10;
+        const end = Math.min(n, start + 10);
+
+        let sum = 0;
+        for(let i = start; i < end; i++){
+          sum += shotScores[i];
+        }
+
+        out += `Total(${start+1}-${end}): ${sum.toFixed(1)}\n`;
+
+        for(let i = end - 1; i >= start; i--){
+          out += `${i+1}.  ${shotScores[i].toFixed(1)}\n`;
+        }
+
+        out += '\n';
       }
 
-      out += '\n';
+      logEl.textContent = out.trim();
+      logEl.scrollTop = 0;
     }
-
-    logEl.textContent = out.trim();
-    logEl.scrollTop = 0; // 最新仍在最上
-  }
-
 
     // Utils
     const ema = (prev,next,a)=> prev + (next-prev)*a;
 
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
-      x = 1 - x; // facingMode 固定 user（你当前版本不需要切换按钮）
+      x = 1 - x;
       let px = x * W;
       let py = y * H;
       px = cx + (px - cx) * sensitivity;
@@ -261,22 +269,18 @@
 
     // Draw
     function drawTarget(){
-      // ✅ 整屏白底（保证射击阶段背景纯白）
       ctx.fillStyle = '#fff';
       ctx.fillRect(0,0,W,H);
 
       const half = targetSquareHalf * DPR;
 
-      // 白方框（靶纸）
       ctx.fillStyle = '#fff';
       ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
 
-      // 方框边
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 4 * DPR;
       ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
 
-      // 黑圆心（必须一直纯黑可见）
       ctx.fillStyle = '#000';
       ctx.beginPath();
       ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2);
@@ -303,7 +307,6 @@
       ctx.stroke();
     }
 
-    // ✅ 提示文字：更大、更粗；放在白方框里，但绝不挡住黑圆心
     function drawGuideOverlay(haveLeft, haveRight){
       const half = targetSquareHalf * DPR;
       const boxX = cx - half;
@@ -311,7 +314,6 @@
       const boxW = 2*half;
       const boxH = 2*half;
 
-      // 字体更大：以方框大小为基准（并封顶）
       const fontPx = Math.min(60*DPR, Math.max(28*DPR, Math.round(boxH * 0.22)));
       const lineH  = fontPx * 1.08;
 
@@ -328,13 +330,10 @@
 
       const lines = msg.split('\n');
 
-      // 放在白方框的“上方区域”，留出中间黑圆心区域
-      // 黑圆心安全区：centerY ± safeR
-      const safeR = (targetDotR*DPR) + (18*DPR); // 黑圆心周围留空
+      const safeR = (targetDotR*DPR) + (18*DPR);
       const topAreaY1 = boxY + 10*DPR;
       const topAreaY2 = (cy - safeR) - 10*DPR;
 
-      // 计算文本块高度，如果放不下就缩小一点
       let blockH = lines.length * lineH;
       let maxAllowedH = Math.max(10*DPR, topAreaY2 - topAreaY1);
       let scale = Math.min(1, maxAllowedH / blockH);
@@ -346,7 +345,6 @@
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      // 计算宽度（限制在白方框内）
       let maxTextW = 0;
       for(const t of lines) maxTextW = Math.max(maxTextW, ctx.measureText(t).width);
       const padX = 10*DPR;
@@ -355,13 +353,11 @@
       const bh = lines.length*lh + padY*2;
 
       const bx = cx - bw/2;
-      const by = topAreaY1 + (maxAllowedH - bh)/2; // 居中到“上方区域”
+      const by = topAreaY1 + (maxAllowedH - bh)/2;
 
-      // 半透明白底框（仍在白方框里，视觉更清晰）
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
       ctx.fillRect(bx, by, bw, bh);
 
-      // 文字
       ctx.fillStyle = '#000';
       for(let i=0;i<lines.length;i++){
         const yy = by + padY + lh/2 + i*lh;
@@ -396,18 +392,54 @@
       }catch{}
     }
 
-    // Trigger (strict pinch)
+    // ========================================
+    // ✅ 改进的捏合识别系统
+    // ========================================
+    
     let isPinched = false;
     let triggerLocked = false;
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    const PINCH_ON  = 0.28;
-    const PINCH_OFF = 0.36;
-    const PINCH_ON_FRAMES  = 2;
-    const PINCH_OFF_FRAMES = 3;
+    // ✅ 方法1：多指标融合判断
+    // - 拇指-食指距离（主指标）
+    // - 拇指-食指的Z轴深度差（防止误判）
+    // - 手掌开合度（辅助验证）
+    const PINCH_DISTANCE_ON  = 0.24;  // 更严格的捏合阈值
+    const PINCH_DISTANCE_OFF = 0.35;
+    const PINCH_Z_DIFF_MAX = 0.08;    // Z轴差异阈值（捏合时两指应该接近）
+    const PALM_SPREAD_MIN = 0.12;     // 手掌最小张开度（防止握拳误判）
+
+    // ✅ 方法2：时序平滑 - 需要连续多帧确认
+    const PINCH_ON_FRAMES  = 3;   // 从2增加到3帧
+    const PINCH_OFF_FRAMES = 4;   // 从3增加到4帧
     let pinchOnCount = 0;
     let pinchOffCount = 0;
+
+    // ✅ 方法3：历史状态平滑
+    const PINCH_HISTORY_SIZE = 5;
+    let pinchDistanceHistory = [];
+    
+    function addToPinchHistory(distance){
+      pinchDistanceHistory.push(distance);
+      if(pinchDistanceHistory.length > PINCH_HISTORY_SIZE){
+        pinchDistanceHistory.shift();
+      }
+    }
+
+    function getPinchDistanceSmoothed(){
+      if(pinchDistanceHistory.length === 0) return 999;
+      const sum = pinchDistanceHistory.reduce((a,b)=>a+b, 0);
+      return sum / pinchDistanceHistory.length;
+    }
+
+    // ✅ 方法4：计算3D欧氏距离（更准确）
+    function distance3D(p1, p2){
+      const dx = p1.x - p2.x;
+      const dy = p1.y - p2.y;
+      const dz = (p1.z || 0) - (p2.z || 0);
+      return Math.sqrt(dx*dx + dy*dy + dz*dz);
+    }
 
     function fire(isCalibrationShot){
       const now = Date.now();
@@ -426,12 +458,11 @@
         firstShotDone = true;
         mode = MODE.PLAY;
 
-        // ✅ 射击阶段：隐藏视频，但底层已是白（canvas整屏白底 + leftPane白底）
         video.style.opacity = '0';
         video.style.pointerEvents = 'none';
 
         statusEl.textContent = '校准完成 ✅ 正式开始';
-        hintEl.textContent = '左手“完全捏合”=开枪';
+        hintEl.textContent = '左手"完全捏合"=开枪';
         return;
       }
 
@@ -440,7 +471,7 @@
       renderScores();
 
       statusEl.textContent = 'READY ✅';
-      hintEl.textContent = '左手“完全捏合”=开枪';
+      hintEl.textContent = '左手"完全捏合"=开枪';
     }
 
     // MediaPipe
@@ -466,25 +497,59 @@
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
-      // left hand pinch
-      const lThumb = leftLm[4];
-      const lIndex = leftLm[8];
-      const wrist  = leftLm[0];
-      const iMcp   = leftLm[5];
+      // ========================================
+      // ✅ 改进的左手捏合检测
+      // ========================================
+      const lThumb = leftLm[4];      // 拇指尖
+      const lIndex = leftLm[8];      // 食指尖
+      const wrist  = leftLm[0];      // 手腕
+      const iMcp   = leftLm[5];      // 食指根部
+      const thumbMcp = leftLm[2];    // 拇指根部
+      const pinky = leftLm[20];      // 小指（用于判断手掌张开度）
 
-      const pinchD = Math.hypot(lThumb.x - lIndex.x, lThumb.y - lIndex.y);
-      const palmS  = Math.max(1e-6, Math.hypot(wrist.x - iMcp.x, wrist.y - iMcp.y));
-      const ratio  = pinchD / palmS;
+      // ✅ 指标1：3D距离（更准确）
+      const pinchDist3D = distance3D(lThumb, lIndex);
+      
+      // ✅ 指标2：归一化距离（相对于手掌大小）
+      const palmSize = Math.max(1e-6, distance3D(wrist, iMcp));
+      const pinchRatio = pinchDist3D / palmSize;
+
+      // ✅ 指标3：Z轴深度差（捏合时两指应该在同一平面）
+      const zDiff = Math.abs((lThumb.z || 0) - (lIndex.z || 0));
+
+      // ✅ 指标4：手掌张开度（防止握拳误判）
+      const palmSpread = distance3D(thumbMcp, pinky) / palmSize;
+
+      // ✅ 指标5：历史平滑
+      addToPinchHistory(pinchRatio);
+      const smoothedRatio = getPinchDistanceSmoothed();
+
+      // 调试信息
+      if(DEBUG_MODE){
+        debugInfo.innerHTML = `
+捏合比例: ${pinchRatio.toFixed(3)}
+平滑值: ${smoothedRatio.toFixed(3)}
+Z差异: ${zDiff.toFixed(3)}
+手掌张开: ${palmSpread.toFixed(3)}
+ON计数: ${pinchOnCount}
+OFF计数: ${pinchOffCount}
+状态: ${isPinched ? '已捏合' : '松开'}
+锁定: ${triggerLocked ? '是' : '否'}
+        `.trim();
+      }
 
       if(!lockReady){
         isPinched = false;
         triggerLocked = false;
         pinchOnCount = pinchOffCount = 0;
+        pinchDistanceHistory = [];
         return;
       }
 
+      // ✅ 已经触发锁定，等待松开
       if(triggerLocked){
-        if(ratio > PINCH_OFF){
+        // 使用平滑值判断松开，更稳定
+        if(smoothedRatio > PINCH_DISTANCE_OFF && zDiff < PINCH_Z_DIFF_MAX){
           pinchOffCount++;
           if(pinchOffCount >= PINCH_OFF_FRAMES){
             triggerLocked = false;
@@ -498,17 +563,32 @@
         return;
       }
 
-      if(ratio < PINCH_ON){
+      // ✅ 多重条件判断捏合
+      const isPinchConditionMet = (
+        smoothedRatio < PINCH_DISTANCE_ON &&    // 距离足够近
+        zDiff < PINCH_Z_DIFF_MAX &&             // Z轴接近（在同一平面）
+        palmSpread > PALM_SPREAD_MIN            // 手掌有一定张开（不是握拳）
+      );
+
+      const isReleaseConditionMet = (
+        smoothedRatio > PINCH_DISTANCE_OFF ||   // 距离拉开
+        zDiff > PINCH_Z_DIFF_MAX * 1.5          // Z轴分离明显
+      );
+
+      // ✅ 状态机计数
+      if(isPinchConditionMet){
         pinchOnCount++;
         pinchOffCount = 0;
-      }else if(ratio > PINCH_OFF){
+      }else if(isReleaseConditionMet){
         pinchOffCount++;
         pinchOnCount = 0;
       }else{
+        // 中间状态，缓慢衰减计数（而不是立即清零）
         pinchOnCount = Math.max(0, pinchOnCount - 1);
-        pinchOffCount= Math.max(0, pinchOffCount - 1);
+        pinchOffCount = Math.max(0, pinchOffCount - 1);
       }
 
+      // ✅ 触发射击
       if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
         isPinched = true;
         pinchOnCount = 0;
@@ -561,11 +641,11 @@
         if(!firstShotDone){
           mode = MODE.READY;
           statusEl.textContent = '已锁定 ✅ 校准发不计分';
-          hintEl.textContent = '左手需要“完全捏合”才会击发';
+          hintEl.textContent = '左手需要"完全捏合"才会击发';
         }else{
           mode = MODE.PLAY;
           statusEl.textContent = 'READY ✅';
-          hintEl.textContent = '左手“完全捏合”=开枪';
+          hintEl.textContent = '左手"完全捏合"=开枪';
         }
       }else{
         lockReady = false;
@@ -614,6 +694,7 @@
           isPinched = false;
           triggerLocked = false;
           pinchOnCount = pinchOffCount = 0;
+          pinchDistanceHistory = [];
 
           updateLockState(false,false);
           render(false,false);
