@@ -9,6 +9,13 @@
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
     #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
+
+    /* ✅ 防止 iOS/移动端点按闪烁/高亮 */
+    *{ -webkit-tap-highlight-color: transparent; }
+    button{ outline:none; }
+    button:focus{ outline:none; }
+    button::-moz-focus-inner{ border:0; }
+
     #leftPane{
       position:relative; flex:0 0 66.6667%; min-height:0;
       background:#fff; overflow:hidden;
@@ -130,14 +137,24 @@
       opacity:0.88;
     }
 
-    /* 分享预览层（白底黑字，横屏不裁按钮） */
-    #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
-    #sharePreview.show{ display:block; }
+    /* ✅ 分享预览层：用 opacity/visibility 替代 display 切换，杜绝“黑线瞬闪” */
+    #sharePreview{
+      position:absolute; inset:0; z-index:20;
+      opacity:0; visibility:hidden; pointer-events:none;
+      transition:opacity 120ms linear, visibility 0ms linear 120ms;
+      transform: translateZ(0);
+      backface-visibility:hidden;
+    }
+    #sharePreview.show{
+      opacity:1; visibility:visible; pointer-events:auto;
+      transition:opacity 120ms linear, visibility 0ms;
+    }
     #sharePreview .sp-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.55); }
 
     #sharePreview .sp-panel{
       position:absolute; left:50%; top:50%;
-      transform:translate(-50%,-50%);
+      transform:translate(-50%,-50%) translateZ(0);
+      backface-visibility:hidden;
       width:min(92vw, 860px);
       max-height:92vh;
       background:#fff; color:#000;
@@ -220,7 +237,7 @@
       }
     }
 
-    /* ✅ 进入页面先点“开始射击” */
+    /* ✅ 进入页面先点“开始射击”（用来解锁摄像头+音频） */
     #startGate{
       position:absolute; inset:0; z-index:50;
       display:flex; align-items:center; justify-content:center;
@@ -233,9 +250,9 @@
       border-radius:0;
       padding:14px 18px;
       font:900 18px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      background:#fff;            /* 白底 */
-      border:2px solid #000;      /* 黑框 */
-      color:#000;                 /* 黑字 */
+      background:#fff;
+      border:2px solid #000;
+      color:#000;
       cursor:pointer;
       box-shadow:0 8px 22px rgba(0,0,0,0.22);
     }
@@ -277,7 +294,6 @@
         </div>
       </div>
 
-      <!-- ✅ Start Gate -->
       <div id="startGate">
         <button id="startBtn">开始射击</button>
       </div>
@@ -618,56 +634,50 @@
     }
 
     // =====================================================
-    // ✅ 音频：在按钮点击“同步解锁”，并播放一个确认音
+    // ✅ 音频：WebAudio + HTMLAudio 双通道，确保不再“完全没声”
     // =====================================================
+
+    // 1) WebAudio（保留）
     let _shotAC = null;
-
-    function audioUnlockAndTestClick(){
+    function audioUnlockWebAudio(){
       const AC = (window.AudioContext || window.webkitAudioContext);
+      if(!AC) return;
       if(!_shotAC) _shotAC = new AC();
-      const ac = _shotAC;
-
-      // 关键：不要 await，保持在用户手势回调栈内
-      if(ac.state === 'suspended'){
-        ac.resume().catch(()=>{});
+      if(_shotAC.state === 'suspended'){
+        _shotAC.resume().catch(()=>{});
       }
-
-      // 立刻播一个极短“确认音”（如果这都听不到=设备静音/浏览器拦截/音量为0）
+      // 极短确认音
       try{
+        const ac = _shotAC;
         const t0 = ac.currentTime;
         const o = ac.createOscillator();
         const g = ac.createGain();
         o.type = 'square';
         o.frequency.setValueAtTime(1200, t0);
         g.gain.setValueAtTime(0.0001, t0);
-        g.gain.exponentialRampToValueAtTime(0.20, t0 + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.002);
         g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.030);
         o.connect(g); g.connect(ac.destination);
         o.start(t0);
         o.stop(t0 + 0.035);
       }catch{}
     }
-
-    // 气步枪“啪/砰”感（更大声一点，避免你听不到）
-    function rifleShotSound(){
+    function rifleShotSoundWebAudio(){
       try{
         if(!_shotAC) return;
         const ac = _shotAC;
-
         if(ac.state === 'suspended'){
           ac.resume().catch(()=>{});
         }
-
         const t0 = ac.currentTime;
 
         const master = ac.createGain();
         master.gain.setValueAtTime(0.0001, t0);
-        master.gain.exponentialRampToValueAtTime(0.60, t0 + 0.004);   // ✅ 音量加大
+        master.gain.exponentialRampToValueAtTime(0.60, t0 + 0.004);
         master.gain.exponentialRampToValueAtTime(0.05, t0 + 0.045);
         master.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.140);
         master.connect(ac.destination);
 
-        // Noise burst
         const noiseDur = 0.16;
         const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * noiseDur), ac.sampleRate);
         const ch = noiseBuf.getChannelData(0);
@@ -697,7 +707,6 @@
         noiseHP.connect(noiseGain);
         noiseGain.connect(master);
 
-        // Low thump
         const thump = ac.createOscillator();
         thump.type = 'sine';
         thump.frequency.setValueAtTime(170, t0);
@@ -713,11 +722,51 @@
 
         noise.start(t0);
         noise.stop(t0 + noiseDur);
-
         thump.start(t0);
         thump.stop(t0 + 0.11);
+      }catch{}
+    }
 
-      }catch(e){}
+    // 2) HTMLAudio（兜底，更容易在 iOS 成功）
+    // 内置一个很短的“枪声” wav
+    const SHOT_WAV_DATAURI =
+      "data:audio/wav;base64," +
+      "UklGRoQGAABXQVZFZm10IBAAAAABAAEAWF4AAAB9AAACABAAZGF0YVAGAAAAAAEABQALABIAHwApADUAPwBGAE0AUgBVAFAARwA6ACoAFwADAPn/7v/h/9L/xf+4/6T/m/+a/5z/oP+f/6P/pP+f/5L/hf95/2n/XP9S/0z/S/9S/2D/cf+G/5//uf/U/+n//v8WAC0ARgBeAHgAjwCkALkAyADSAOAA5gDvAPMA8wDwAOoA4ADTAOIAuACpAJcAggBtAFkARgA0ACMAEgAFAAUADQAcAC8ARgBiAH8AnAC3AM0A2gDoAPAA8wDzAO8A5wDbAMsAugClAJAAegBmAFEAOwApABsAEQAOABEAHAArAD8AVwBwAIgAogC6AM0A3ADoAPAA8wDyAO4A5gDaAMoAugCkAI8AegBkAE4AOAAkABUACwAIAAsAEgAfADMAQwBbAHQAjwCmAL0AzgDbAOgA8AAzAPEA7wDnANoAywC6AKUAlwCBAOkAZQBTAEIAKgAYAA0ABQAFAAsAFgAjADoAUgBtAIgAowC7AM0A3gDrAPMA9gD1APEA6gDfANAAuwCmAJEAfABoAFMADgA0ACQAFwAPAA0ADwAVAB8ALwBEAF4AeQCUAKwAwQDSAN8A7wD3APoA+QD1AO8A5gDZAMoAugClAJAAegBlAFEAOwApABoADwAKAAoADgAWACMAOwBSAG0AiQCkALsAzQDcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIAagCFAKAAuADKANYA5QDtAPAA8wDyAO4A5gDbAM4AvACoAJMAdgBiAE0AOAAkABUACwAJAAkADgAVACMAOwBTAGwAhwChALoAzADcAOgA8ADzAPEA7QDnANoAywC6AKUAlwCCAGoAVQBBACwAGgAOAAYABgALABYAIwA6AFIA";
+
+    let shotAudioBase = null;
+
+    function audioUnlockHtmlAudio(){
+      try{
+        if(!shotAudioBase){
+          shotAudioBase = new Audio(SHOT_WAV_DATAURI);
+          shotAudioBase.preload = 'auto';
+          shotAudioBase.volume = 1.0;
+        }
+        // 关键：在用户手势里 play 一下再 pause，解锁权限
+        const p = shotAudioBase.play();
+        if(p && typeof p.then === 'function'){
+          p.then(()=>{
+            shotAudioBase.pause();
+            shotAudioBase.currentTime = 0;
+          }).catch(()=>{});
+        }else{
+          // 旧浏览器
+          setTimeout(()=>{
+            try{ shotAudioBase.pause(); shotAudioBase.currentTime=0; }catch{}
+          }, 20);
+        }
+      }catch{}
+    }
+
+    function rifleShotSoundHtmlAudio(){
+      try{
+        if(!shotAudioBase) return;
+        const a = shotAudioBase.cloneNode(true);
+        a.volume = 1.0;
+        // 不要 await，避免丢失手势链
+        const p = a.play();
+        if(p && typeof p.catch === 'function') p.catch(()=>{});
+      }catch{}
     }
 
     // Share preview open/close
@@ -882,8 +931,9 @@
       flashEl.style.opacity='1';
       setTimeout(()=>flashEl.style.opacity='0',80);
 
-      // ✅ 每枪音效
-      rifleShotSound();
+      // ✅ 每枪音效：优先 HTMLAudio（更稳定），WebAudio 作为备用
+      rifleShotSoundHtmlAudio();
+      rifleShotSoundWebAudio();
 
       if(isCalibrationShot){
         firstShotDone = true;
@@ -1135,10 +1185,10 @@ triggerLocked: ${triggerLocked}
       await ensureVideoPlays();
     }
 
-    // ✅ 进入页面不自动 start，等用户点“开始射击”
     function startFromGate(){
-      // ✅ 关键：在用户手势回调里同步解锁 + 播确认音
-      audioUnlockAndTestClick();
+      // ✅ 必须在用户手势回调里同步解锁音频
+      audioUnlockWebAudio();
+      audioUnlockHtmlAudio();
 
       startGate.style.display = 'none';
 
@@ -1150,7 +1200,6 @@ triggerLocked: ${triggerLocked}
       });
     }
 
-    // 初始先画靶子
     render(false,false,false);
     statusEl.textContent = '点击“开始射击”';
 
