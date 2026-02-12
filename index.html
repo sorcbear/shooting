@@ -402,19 +402,19 @@
     let lastShotTs = 0;
 
     // ✅ OK手势捏合检测（拇指+食指尖接触，其他手指握拳）
-    const PINCH_DISTANCE_ON  = 0.30;  // 指尖距离阈值
-    const PINCH_DISTANCE_OFF = 0.38;  
-    const JOINT_DISTANCE_MAX = 0.65;  // 关节距离阈值（关节也要相对接近）
+    const PINCH_DISTANCE_ON  = 0.35;  // 放宽到0.35，更容易触发
+    const PINCH_DISTANCE_OFF = 0.42;  // 相应放宽松开阈值
+    const JOINT_DISTANCE_MAX = 0.75;  // 放宽关节距离要求
     const PINCH_Z_DIFF_MAX = 0.15;    // Z轴差异阈值
 
     // ✅ 方法2：时序平滑 - 需要连续多帧确认
-    const PINCH_ON_FRAMES  = 2;   // 恢复为2帧
-    const PINCH_OFF_FRAMES = 3;   // 恢复为3帧
+    const PINCH_ON_FRAMES  = 1;   // 改为1帧立即触发！
+    const PINCH_OFF_FRAMES = 2;   // 松开只需2帧
     let pinchOnCount = 0;
     let pinchOffCount = 0;
 
     // ✅ 方法3：历史状态平滑
-    const PINCH_HISTORY_SIZE = 5;
+    const PINCH_HISTORY_SIZE = 3;  // 从5减到3，响应更快
     let pinchDistanceHistory = [];
     
     function addToPinchHistory(distance){
@@ -562,11 +562,11 @@ OFF计数: ${pinchOffCount}
         return;
       }
 
-      // ✅ OK手势捏合判断
+      // ✅ OK手势捏合判断（先简化，只看指尖距离）
       const isPinchConditionMet = (
-        smoothedRatio < PINCH_DISTANCE_ON &&     // 指尖靠近
-        jointRatio < JOINT_DISTANCE_MAX          // 关节也相对接近（防止只是指尖碰巧接触）
-        // Z轴检查先暂时关闭，确保能触发
+        smoothedRatio < PINCH_DISTANCE_ON        // 只看指尖距离
+        // 关节距离先暂时关闭，确保能快速触发
+        // && jointRatio < JOINT_DISTANCE_MAX  
       );
 
       const isReleaseConditionMet = (
