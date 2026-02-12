@@ -111,7 +111,7 @@
     const debugInfo = document.getElementById('debugInfo');
 
     // 调试模式开关（改为true可显示实时捏合数据）
-    const DEBUG_MODE = false;
+    const DEBUG_MODE = true;  // 先开启调试，看实际数值
     if(DEBUG_MODE) debugInfo.style.display = 'block';
 
     // Canvas size
@@ -401,18 +401,15 @@
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    // ✅ 方法1：多指标融合判断
-    // - 拇指-食指距离（主指标）
-    // - 拇指-食指的Z轴深度差（防止误判）
-    // - 手掌开合度（辅助验证）
-    const PINCH_DISTANCE_ON  = 0.24;  // 更严格的捏合阈值
-    const PINCH_DISTANCE_OFF = 0.35;
-    const PINCH_Z_DIFF_MAX = 0.08;    // Z轴差异阈值（捏合时两指应该接近）
-    const PALM_SPREAD_MIN = 0.12;     // 手掌最小张开度（防止握拳误判）
+    // ✅ OK手势捏合检测（拇指+食指尖接触，其他手指握拳）
+    const PINCH_DISTANCE_ON  = 0.30;  // 指尖距离阈值
+    const PINCH_DISTANCE_OFF = 0.38;  
+    const JOINT_DISTANCE_MAX = 0.65;  // 关节距离阈值（关节也要相对接近）
+    const PINCH_Z_DIFF_MAX = 0.15;    // Z轴差异阈值
 
     // ✅ 方法2：时序平滑 - 需要连续多帧确认
-    const PINCH_ON_FRAMES  = 3;   // 从2增加到3帧
-    const PINCH_OFF_FRAMES = 4;   // 从3增加到4帧
+    const PINCH_ON_FRAMES  = 2;   // 恢复为2帧
+    const PINCH_OFF_FRAMES = 3;   // 恢复为3帧
     let pinchOnCount = 0;
     let pinchOffCount = 0;
 
@@ -503,22 +500,24 @@
       const lThumb = leftLm[4];      // 拇指尖
       const lIndex = leftLm[8];      // 食指尖
       const wrist  = leftLm[0];      // 手腕
-      const iMcp   = leftLm[5];      // 食指根部
-      const thumbMcp = leftLm[2];    // 拇指根部
-      const pinky = leftLm[20];      // 小指（用于判断手掌张开度）
+      const iMcp   = leftLm[5];      // 食指根部（MCP关节）
+      const thumbIp = leftLm[3];     // 拇指指尖关节
+      const indexPip = leftLm[6];    // 食指第二关节
 
-      // ✅ 指标1：3D距离（更准确）
-      const pinchDist3D = distance3D(lThumb, lIndex);
+      // ✅ 指标1：指尖3D距离（主要判断依据）
+      const tipDist3D = distance3D(lThumb, lIndex);
       
-      // ✅ 指标2：归一化距离（相对于手掌大小）
+      // ✅ 指标2：归一化距离（相对于手掌大小，消除远近影响）
       const palmSize = Math.max(1e-6, distance3D(wrist, iMcp));
-      const pinchRatio = pinchDist3D / palmSize;
+      const pinchRatio = tipDist3D / palmSize;
 
-      // ✅ 指标3：Z轴深度差（捏合时两指应该在同一平面）
+      // ✅ 指标3：关节距离（拇指指尖关节 vs 食指第二关节）
+      // OK手势时，两个关节也会接近，这能过滤掉"只是指尖碰巧路过"的情况
+      const jointDist = distance3D(thumbIp, indexPip);
+      const jointRatio = jointDist / palmSize;
+
+      // ✅ 指标4：Z轴深度差（捏合时两指应该在同一平面）
       const zDiff = Math.abs((lThumb.z || 0) - (lIndex.z || 0));
-
-      // ✅ 指标4：手掌张开度（防止握拳误判）
-      const palmSpread = distance3D(thumbMcp, pinky) / palmSize;
 
       // ✅ 指标5：历史平滑
       addToPinchHistory(pinchRatio);
@@ -529,8 +528,8 @@
         debugInfo.innerHTML = `
 捏合比例: ${pinchRatio.toFixed(3)}
 平滑值: ${smoothedRatio.toFixed(3)}
+关节比例: ${jointRatio.toFixed(3)}
 Z差异: ${zDiff.toFixed(3)}
-手掌张开: ${palmSpread.toFixed(3)}
 ON计数: ${pinchOnCount}
 OFF计数: ${pinchOffCount}
 状态: ${isPinched ? '已捏合' : '松开'}
@@ -563,16 +562,15 @@ OFF计数: ${pinchOffCount}
         return;
       }
 
-      // ✅ 多重条件判断捏合
+      // ✅ OK手势捏合判断
       const isPinchConditionMet = (
-        smoothedRatio < PINCH_DISTANCE_ON &&    // 距离足够近
-        zDiff < PINCH_Z_DIFF_MAX &&             // Z轴接近（在同一平面）
-        palmSpread > PALM_SPREAD_MIN            // 手掌有一定张开（不是握拳）
+        smoothedRatio < PINCH_DISTANCE_ON &&     // 指尖靠近
+        jointRatio < JOINT_DISTANCE_MAX          // 关节也相对接近（防止只是指尖碰巧接触）
+        // Z轴检查先暂时关闭，确保能触发
       );
 
       const isReleaseConditionMet = (
-        smoothedRatio > PINCH_DISTANCE_OFF ||   // 距离拉开
-        zDiff > PINCH_Z_DIFF_MAX * 1.5          // Z轴分离明显
+        smoothedRatio > PINCH_DISTANCE_OFF       // 指尖拉开
       );
 
       // ✅ 状态机计数
