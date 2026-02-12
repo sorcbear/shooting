@@ -9,7 +9,10 @@
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
     #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
-    #leftPane{position:relative; flex:0 0 66.6667%; min-height:0; background:#fff; overflow:hidden;}
+    #leftPane{
+      position:relative; flex:0 0 66.6667%; min-height:0;
+      background:#000; overflow:hidden;
+    }
     #rightPane{
       position:relative; flex:0 0 33.3333%; min-height:0;
       background:#fff; border-top:1px solid #eee;
@@ -19,14 +22,28 @@
     @media (orientation: landscape){
       #app{flex-direction:row;}
       #leftPane{flex:0 0 66.6667%; height:100vh;}
-      #rightPane{flex:0 0 33.3333%; height:100vh; border-top:none; border-left:1px solid #eee;}
+      #rightPane{
+        flex:0 0 33.3333%; height:100vh;
+        border-top:none; border-left:1px solid #eee;
+      }
     }
+
+    /* ✅ 解决思路(2)：iOS 合成层更稳定（video+canvas叠层） */
     #video{
       position:absolute; inset:0; width:100%; height:100%;
-      object-fit:cover; transform:scaleX(-1); z-index:0;
+      object-fit:cover; transform:scaleX(-1) translateZ(0);
+      will-change: transform;
+      backface-visibility: hidden;
+      z-index:0;
       background:#000; opacity:1; transition:opacity 120ms linear;
     }
-    #cv{position:absolute; inset:0; width:100%; height:100%; touch-action:none; z-index:1;}
+    #cv{
+      position:absolute; inset:0; width:100%; height:100%;
+      touch-action:none; z-index:1;
+      transform: translateZ(0);
+      will-change: transform;
+    }
+
     #hud{
       font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       color:#111;background:rgba(255,255,255,.96);
@@ -54,7 +71,7 @@
 <body>
   <div id="app">
     <div id="leftPane">
-      <video id="video" playsinline></video>
+      <video id="video" playsinline muted></video>
       <canvas id="cv"></canvas>
       <div id="flash"></div>
     </div>
@@ -73,9 +90,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
 
   <script>
-    // =========================
     // DOM
-    // =========================
     const leftPane = document.getElementById('leftPane');
     const video = document.getElementById('video');
     const canvas = document.getElementById('cv');
@@ -85,102 +100,104 @@
     const flashEl = document.getElementById('flash');
     const hintEl = document.getElementById('hint');
 
-    // =========================
-    // 设备识别：iPhone / iPad / other
-    // =========================
-    function getDeviceType(){
+    // Canvas size
+    let W=0,H=0,DPR=1,cx=0,cy=0;
+    let rectW=0, rectH=0, shortCss=0;
+
+    function isIPhoneLike(){
       const ua = navigator.userAgent || '';
       const isiPhone = /iPhone/.test(ua);
-      // iPadOS: iPad 或 Macintosh + Mobile
-      const isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua));
-      if(isiPhone) return 'iphone';
-      if(isiPad) return 'ipad';
-      return 'other';
+      const isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua)); // iPadOS
+      if(isiPhone) return true;
+      if(isiPad) return false;
+      return shortCss < 520;
     }
-
-    // =========================
-    // ✅ iPhone / iPad 独立参数（你只需要改这里）
-    // followAlpha 越接近 1 越抖、越跟手
-    // sensitivity 越大，准星位移放大越大（更抖）
-    // =========================
-    const AIM_PARAMS = {
-      iphone: { followAlpha: 0.999, sensitivity: 6 },
-      ipad:   { followAlpha: 0.9720, sensitivity: 2.05 },
-      other:  { followAlpha: 0.9850, sensitivity: 3.00 },
-    };
 
     // Aim（准星）
     let aimX=null, aimY=null;
-    let followAlpha = AIM_PARAMS.other.followAlpha;
-    let sensitivity = AIM_PARAMS.other.sensitivity;
+    let followAlpha = 0.97;
+    let sensitivity = 2.4;
 
-    function applyAimParams(){
-      const t = getDeviceType();
-      followAlpha = AIM_PARAMS[t].followAlpha;
-      sensitivity = AIM_PARAMS[t].sensitivity;
+    // ✅ 分开调 iPhone / iPad 抖动
+    function tuneAimByDevice(){
+      const phone = isIPhoneLike();
+      followAlpha = phone ? 0.995 : 0.965;
+
+      const REF_SHORT = 390;
+      const baseGainPhone = 3.15;
+      const baseGainPad   = 1.85;
+      const base = phone ? baseGainPhone : baseGainPad;
+
+      let gain = base * (REF_SHORT / Math.max(1, shortCss));
+      sensitivity = Math.min(4.2, Math.max(1.1, gain));
     }
 
-    // =========================
-    // Canvas size
-    // =========================
-    let W=0,H=0,DPR=1,cx=0,cy=0;
+    // ✅ 解决思路(2)：iOS 方向切换/地址栏变化时，做“二次 resize”
     function resize(){
       DPR = Math.max(1, window.devicePixelRatio || 1);
 
       const rect = leftPane.getBoundingClientRect();
-      W = Math.max(1, Math.floor(rect.width * DPR));
-      H = Math.max(1, Math.floor(rect.height * DPR));
+      rectW = rect.width;
+      rectH = rect.height;
+      shortCss = Math.max(1, Math.min(rectW, rectH));
+
+      W = Math.max(1, Math.floor(rectW * DPR));
+      H = Math.max(1, Math.floor(rectH * DPR));
 
       canvas.width = W; canvas.height = H;
-      canvas.style.width = rect.width+'px';
-      canvas.style.height = rect.height+'px';
+      canvas.style.width = rectW+'px';
+      canvas.style.height = rectH+'px';
 
       cx = W/2; cy = H/2;
 
-      // ✅ 每次 resize 重新应用设备参数（保持 iPhone / iPad 分开）
-      applyAimParams();
+      tuneAimByDevice();
     }
-    addEventListener('resize', resize);
-    resize();
+
+    function resizeTwice(){
+      resize();
+      requestAnimationFrame(()=>resize());
+      setTimeout(()=>resize(), 120);
+    }
+
+    addEventListener('resize', resizeTwice);
+    addEventListener('orientationchange', ()=>setTimeout(resizeTwice, 150));
+    resizeTwice();
 
     // Camera
     let facingMode = 'user';
 
-    // =========================
-    // States：第一发为“校准发”（不计分）
-    // =========================
+    // ✅ 解决思路(1)：视频是否真正开始渲染（避免“局部黑/冻结/没刷”错觉）
+    let videoReady = false;
+    function updateVideoReady(){
+      // videoWidth>0 + readyState足够，基本等价“有纹理在更新”
+      videoReady = (video.readyState >= 2) && (video.videoWidth > 0) && (video.videoHeight > 0);
+      return videoReady;
+    }
+
+    // States（简化：第一发为校准发，不计分）
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', PLAY:'PLAY' };
     let mode = MODE.WAIT_BOTH;
 
-    let firstShotDone = false; // 校准发完成后才计分
+    let firstShotDone = false;
     let lockReady = false;
 
-    // =========================
     // 靶心/瞄具
-    // =========================
-    const targetSquareHalf = 110;  // 靶纸边长的一半（逻辑像素）
-    const targetDotR = 22;         // 靶心黑点半径（逻辑像素）
+    const targetSquareHalf = 110;
+    const targetDotR = 22;
     const sight_outer_r = 120;
     const sight_inner_r = 44;
-
-    // 不画红线（保留结构但不绘制）
-    let trail = [];
-    const trailMax = 320;
-    const trailMinMove = 0.05;
 
     // Freeze
     const FREEZE_MS = 220;
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
-    // Lock（第一枪前锁定）
+    // Lock
     const LOCK_DIST_PX = 38;
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
 
-    // =========================
-    // 计分（中心=10.9，触碰内环=6.0）
-    // =========================
+    // 计分
     const CENTER_SCORE = 10.9;
     const TOUCH_SCORE  = 6.0;
 
@@ -188,17 +205,15 @@
       const d = Math.hypot(aimX_px - cx, aimY_px - cy);
       const Rb  = targetDotR * DPR;
       const Rin = sight_inner_r * DPR;
-
       const d_ref = Math.max(1e-6, Rin - Rb);
       const dropAtRef = (CENTER_SCORE - TOUCH_SCORE);
       const constant = d_ref / dropAtRef;
-
       let score = CENTER_SCORE - (d / constant);
       score = Math.max(0, Math.min(CENTER_SCORE, score));
       return Math.round(score * 10) / 10;
     }
 
-    // Scores：倒序显示（最新在最上）
+    // Scores（倒序：最新在最上）
     let shotScores = [];
     function renderScores(){
       let out = '';
@@ -207,7 +222,7 @@
         out += `${idx}.  ${shotScores[i].toFixed(1)}\n`;
       }
       logEl.textContent = out.trim() || '';
-      logEl.scrollTop = 0; // 最新在最上 -> 固定滚到顶部
+      logEl.scrollTop = 0;
     }
 
     // Utils
@@ -224,14 +239,6 @@
       py = cy + (py - cy) * sensitivity;
 
       return {px,py};
-    }
-
-    function pushTrail(x,y){
-      if(trail.length===0){ trail.push({x,y}); return; }
-      const last = trail[trail.length-1];
-      if(Math.hypot(x-last.x, y-last.y) < trailMinMove*DPR) return;
-      trail.push({x,y});
-      if(trail.length>trailMax) trail.shift();
     }
 
     // Draw
@@ -272,23 +279,47 @@
       ctx.stroke();
     }
 
+    // ✅ 文案统一变大加粗（你要求的）
     function drawGuideOverlay(haveLeft, haveRight){
       ctx.save();
-      ctx.font = `${16*DPR}px system-ui,sans-serif`;
+
+      // 大字：iPhone/iPad都明显（按短边自适应）
+      const big = Math.max(18, Math.round((shortCss * 0.06))); // 例如 390 -> 23, 768 -> 46
+      const fontPx = Math.min(46, big) * DPR;
+
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+      ctx.font = `900 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
 
       let msg = '';
-      if(!haveLeft || !haveRight) msg = '请双手入框（尽量左右分开）';
-      else if(!lockReady) msg = '请将准星对准靶心...';
-      else if(!firstShotDone) msg = '已锁定 ✅ 捏合打一发“校准发”（不计分）';
-      else msg = 'READY ✅ 左手完全捏合开火';
+      if(!videoReady){
+        msg = '等待摄像头画面…';
+      }else if(!haveLeft || !haveRight){
+        msg = '移动双手位置\n直到露出瞄准器';
+      }else if(!lockReady){
+        msg = '移动双手位置\n直到露出瞄准器';
+      }else if(!firstShotDone){
+        msg = '已锁定 ✅\n捏合打一发“校准发”（不计分）';
+      }else{
+        msg = 'READY ✅\n完全捏合开火';
+      }
 
-      const mw = ctx.measureText(msg).width + 44*DPR;
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.fillRect(cx-mw/2, cy-24*DPR, mw, 48*DPR);
+      const lines = msg.split('\n');
+      const lineH = fontPx * 1.15;
+
+      const maxW = Math.max(...lines.map(t=>ctx.measureText(t).width));
+      const padX = 26*DPR;
+      const padY = 20*DPR;
+      const boxW = maxW + padX*2;
+      const boxH = lines.length*lineH + padY*2;
+
+      ctx.fillStyle = 'rgba(255,255,255,0.62)';
+      ctx.fillRect(cx-boxW/2, cy-boxH/2, boxW, boxH);
+
       ctx.fillStyle = '#000';
-      ctx.fillText(msg, cx, cy);
+      for(let i=0;i<lines.length;i++){
+        ctx.fillText(lines[i], cx, cy - (lines.length-1)*lineH/2 + i*lineH);
+      }
 
       ctx.restore();
     }
@@ -318,21 +349,16 @@
       }catch{}
     }
 
-    // =========================
-    // ✅ 扳机：更严格“完全捏合”
-    // =========================
+    // 扳机（严格）
     let isPinched = false;
     let triggerLocked = false;
 
-    const SHOT_COOLDOWN_MS = 420;
+    const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    // ✅ 这里是“严格度”核心：你要更严格就把 ON 再调小一点
-    // 经验值：0.22~0.30
-    const PINCH_ON  = 0.24;  // 必须很贴合才算捏合（更严格）
-    const PINCH_OFF = 0.34;  // 必须明显松开才复位（防双发/抖动）
+    const PINCH_ON  = 0.28; // 完全捏合
+    const PINCH_OFF = 0.36;
 
-    // 连续帧确认：既不难触发，又能砍掉误触
     const PINCH_ON_FRAMES  = 2;
     const PINCH_OFF_FRAMES = 3;
 
@@ -356,12 +382,10 @@
       if(isCalibrationShot){
         firstShotDone = true;
         mode = MODE.PLAY;
-
         video.style.opacity = '0';
         video.style.pointerEvents = 'none';
-
         statusEl.textContent = '校准完成 ✅ 正式开始';
-        hintEl.textContent = '左手完全捏合=开枪';
+        hintEl.textContent = '左手“完全捏合”=开枪';
         return;
       }
 
@@ -370,7 +394,7 @@
       renderScores();
 
       statusEl.textContent = 'READY ✅';
-      hintEl.textContent = '左手完全捏合=开枪';
+      hintEl.textContent = '左手“完全捏合”=开枪';
     }
 
     // MediaPipe
@@ -385,7 +409,10 @@
       const now = Date.now();
       if(now < freezeUntil) return;
 
-      // 1) 右手：准星
+      // ✅ 视频没ready时，不做任何锁定/触发（解决思路1）
+      if(!videoReady) return;
+
+      // 右手：准星
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
@@ -395,9 +422,7 @@
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
-      if(mode === MODE.PLAY) pushTrail(aimX, aimY);
-
-      // 2) 左手：捏合 ratio（尺度无关）
+      // 左手：捏合
       const lThumb = leftLm[4];
       const lIndex = leftLm[8];
       const wrist  = leftLm[0];
@@ -407,7 +432,6 @@
       const palmS  = Math.max(1e-6, Math.hypot(wrist.x - iMcp.x, wrist.y - iMcp.y));
       const ratio  = pinchD / palmS;
 
-      // 允许开火：只要已经 lockReady（第一发也走这里，但不计分）
       if(!lockReady){
         isPinched = false;
         triggerLocked = false;
@@ -415,7 +439,6 @@
         return;
       }
 
-      // 扳机锁：必须明确松开才能再次击发（根治双发）
       if(triggerLocked){
         if(ratio > PINCH_OFF){
           pinchOffCount++;
@@ -431,7 +454,6 @@
         return;
       }
 
-      // 正常捏合检测
       if(ratio < PINCH_ON){
         pinchOnCount++;
         pinchOffCount = 0;
@@ -443,7 +465,6 @@
         pinchOffCount= Math.max(0, pinchOffCount - 1);
       }
 
-      // 触发
       if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
         isPinched = true;
         pinchOnCount = 0;
@@ -457,6 +478,17 @@
     }
 
     function updateLockState(haveLeft, haveRight){
+      // ✅ 视频没ready时：直接提示等待，不进入锁定流程（解决思路1）
+      if(!videoReady){
+        lockFrames = 0;
+        lockReady = false;
+        firstShotDone = false;
+        mode = MODE.WAIT_BOTH;
+        statusEl.textContent = '等待摄像头画面…';
+        hintEl.textContent = '';
+        return;
+      }
+
       if(!haveLeft || !haveRight){
         lockFrames = 0;
         lockReady = false;
@@ -465,7 +497,6 @@
 
         statusEl.textContent = '等待双手...';
         hintEl.textContent = '右手食指瞄准，左手完全捏合开火';
-
         video.style.opacity = '1';
         video.style.pointerEvents = 'auto';
         return;
@@ -485,12 +516,12 @@
         lockReady = true;
         if(!firstShotDone){
           mode = MODE.READY;
-          statusEl.textContent = '已锁定 ✅ 打一发校准发（不计分）';
+          statusEl.textContent = '已锁定 ✅ 校准发不计分';
           hintEl.textContent = '左手需要“完全捏合”才会击发';
         }else{
           mode = MODE.PLAY;
           statusEl.textContent = 'READY ✅';
-          hintEl.textContent = '左手完全捏合=开枪';
+          hintEl.textContent = '左手“完全捏合”=开枪';
         }
       }else{
         lockReady = false;
@@ -502,9 +533,21 @@
 
     // Init
     let hands=null, camera=null;
+
+    async function ensureVideoPlays(){
+      // ✅ 解决思路(1)：强制尝试播放（iOS 有时需要）
+      try{
+        video.muted = true;
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
+        await video.play();
+      }catch{}
+      updateVideoReady();
+    }
+
     async function start(){
       statusEl.textContent = '请求摄像头...';
-      resize();
+      resizeTwice();
 
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
       hands.setOptions({
@@ -515,6 +558,8 @@
       });
 
       hands.onResults(res=>{
+        updateVideoReady();
+
         const lm = res.multiHandLandmarks||[];
         const hd = res.multiHandedness||[];
         const lIdx = getHandIndexByLabel(hd, 'Left');
@@ -539,7 +584,10 @@
         render(true,true);
       });
 
-      // reset state
+      // 监听 video 事件：确保 ready 状态更新
+      video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
+      video.addEventListener('playing', ()=>{ updateVideoReady(); }, {once:false});
+
       video.style.opacity = '1';
       video.style.pointerEvents = 'auto';
       firstShotDone = false;
@@ -547,14 +595,19 @@
       lockFrames = 0;
       mode = MODE.WAIT_BOTH;
 
-      // 镜像
-      video.style.transform = (facingMode==='user')?'scaleX(-1)':'none';
+      video.style.transform = (facingMode==='user')?'scaleX(-1) translateZ(0)':'translateZ(0)';
 
       camera = new Camera(video, {
-        onFrame: async()=>{ await hands.send({image:video}); },
+        onFrame: async()=>{
+          // 关键：有些 iOS 状态下 video 不自动 play，这里持续尝试一次
+          if(!videoReady) await ensureVideoPlays();
+          await hands.send({image:video});
+        },
         width:640, height:480, facingMode
       });
+
       await camera.start();
+      await ensureVideoPlays();
     }
 
     start().catch(e=>{
