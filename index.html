@@ -75,7 +75,7 @@
     }
     /* 分享按钮 */
     #shareBtn{
-      position:absolute; bottom:16px; right:16px; z-index:4;
+      position:absolute; top:16px; right:16px; z-index:4;  /* 改到右上角 */
       background:#000; color:#fff;
       border:none; border-radius:0; /* 直角边 */
       padding:12px 24px; font-size:16px; font-weight:600;
@@ -98,11 +98,11 @@
       background-size:contain;
       background-repeat:no-repeat;
     }
-    /* 奥运庆祝画面 */
+    /* 奥运庆祝画面 - 改为成绩预览画面 */
     #celebration{
       position:absolute; inset:0; z-index:10;
-      background:rgba(255,255,255,0.95);
-      display:none; /* 默认隐藏 */
+      background:#000;  /* 纯黑背景 */
+      display:none;
       flex-direction:column;
       align-items:center; justify-content:center;
       animation:fadeIn 0.3s ease-out;
@@ -111,27 +111,72 @@
       display:flex;
     }
     @keyframes fadeIn{
-      from{opacity:0; transform:scale(0.9);}
+      from{opacity:0; transform:scale(0.95);}
       to{opacity:1; transform:scale(1);}
     }
+    
+    /* 成绩展示区域 */
+    #celebration .scoreBoard{
+      background:#fff;
+      border-radius:16px;
+      padding:60px 80px;
+      max-width:800px;
+      text-align:center;
+    }
+    
     #celebration .trophy{
-      font-size:120px; margin-bottom:20px;
-      animation:bounce 0.6s ease-in-out infinite;
+      font-size:80px; margin-bottom:20px;
     }
-    @keyframes bounce{
-      0%, 100%{transform:translateY(0);}
-      50%{transform:translateY(-20px);}
-    }
+    
     #celebration .title{
-      font:900 48px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      color:#FFD700; text-shadow:2px 2px 4px rgba(0,0,0,0.2);
-      margin-bottom:12px;
+      font:900 64px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:#000;
+      margin-bottom:40px;
     }
-    #celebration .subtitle{
-      font:600 24px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    
+    #celebration .scoreItem{
+      font:bold 32px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       color:#333;
+      margin:16px 0;
+      text-align:left;
     }
-    /* 撒花动画 */
+    
+    #celebration .timestamp{
+      font:24px system-ui;
+      color:#999;
+      margin-top:40px;
+    }
+    
+    /* 保存按钮 */
+    #celebration .saveBtn{
+      position:absolute; bottom:40px;
+      background:#fff; color:#000;
+      border:2px solid #fff;
+      padding:16px 48px;
+      font:bold 20px system-ui;
+      cursor:pointer;
+      transition:all 0.2s;
+    }
+    #celebration .saveBtn:hover{
+      background:#000; color:#fff;
+    }
+    
+    /* 关闭按钮 */
+    #celebration .closeBtn{
+      position:absolute; top:20px; right:20px;
+      background:rgba(255,255,255,0.2);
+      color:#fff;
+      border:none;
+      width:40px; height:40px;
+      font-size:24px;
+      cursor:pointer;
+      transition:all 0.2s;
+    }
+    #celebration .closeBtn:hover{
+      background:rgba(255,255,255,0.3);
+    }
+    
+    /* 撒花动画（保留用于自动弹出时） */
     .confetti{
       position:absolute; width:10px; height:10px;
       background:#FFD700; opacity:0;
@@ -157,11 +202,16 @@
       <div id="debugInfo"></div>
       <button id="shareBtn">分享成绩</button>
       
-      <!-- 奥运庆祝画面 -->
+      <!-- 成绩预览画面 -->
       <div id="celebration">
-        <div class="trophy">🏆</div>
-        <div class="title">奥运选手！</div>
-        <div class="subtitle">10发总分 105+</div>
+        <button class="closeBtn" onclick="celebration.classList.remove('show')">✕</button>
+        <div class="scoreBoard">
+          <div class="trophy" id="celebTrophy">🎯</div>
+          <div class="title" id="celebTitle">Air Finger Rifle</div>
+          <div id="celebScores"></div>
+          <div class="timestamp" id="celebTimestamp"></div>
+        </div>
+        <button class="saveBtn" onclick="saveScoreImage()">保存图片</button>
       </div>
     </div>
 
@@ -482,51 +532,136 @@
       }catch{}
     }
 
-    // ✅ 奥运选手庆祝动画
-    function triggerOlympicCelebration(){
-      celebration.classList.add('show');
-      
-      // 撒花效果
-      for(let i = 0; i < 50; i++){
-        setTimeout(()=>{
-          const confetti = document.createElement('div');
-          confetti.className = 'confetti';
-          confetti.style.left = Math.random() * 100 + '%';
-          confetti.style.top = '-10px';
-          confetti.style.background = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'][Math.floor(Math.random()*5)];
-          confetti.style.animationDelay = Math.random() * 0.5 + 's';
-          celebration.appendChild(confetti);
-          
-          setTimeout(()=>confetti.remove(), 3000);
-        }, i * 30);
+    // ✅ 根据分数获取称号和颜色
+    function getRankInfo(score){
+      if(score < 90){
+        return {title: '没什么天赋', color: '#999', emoji: '😅'};
+      }else if(score < 97){
+        return {title: '有点菜了', color: '#FF6B6B', emoji: '😬'};
+      }else if(score < 100){
+        return {title: '一般般', color: '#FFA500', emoji: '😐'};
+      }else if(score < 102){
+        return {title: '有点厉害', color: '#4ECDC4', emoji: '😊'};
+      }else if(score < 105){
+        return {title: '有望冲击奥运', color: '#45B7D1', emoji: '🔥'};
+      }else if(score < 106){
+        return {title: '奥运选手！', color: '#FFD700', emoji: '🏆'};
+      }else{
+        return {title: '奥运冠军', color: '#FFD700', emoji: '👑'};
       }
-
-      // 庆祝音效
-      try{
-        const ac = new (window.AudioContext||window.webkitAudioContext)();
-        [440, 554, 659, 880].forEach((freq, i)=>{
-          setTimeout(()=>{
-            const o = ac.createOscillator();
-            const g = ac.createGain();
-            o.type='sine';
-            o.frequency.value=freq;
-            g.gain.value=0.1;
-            o.connect(g); g.connect(ac.destination);
-            o.start();
-            setTimeout(()=>{o.stop();}, 200);
-          }, i * 150);
-        });
-        setTimeout(()=>ac.close(), 1000);
-      }catch{}
-
-      // 3秒后恢复
-      setTimeout(()=>{
-        celebration.classList.remove('show');
-      }, 3000);
     }
 
-    // ✅ 分享成绩功能
+    // ✅ 奥运选手庆祝动画（自动弹出）
+    function triggerOlympicCelebration(){
+      // 计算最近10发总分
+      const n = shotScores.length;
+      const recentStart = Math.max(0, n - 10);
+      let recentSum = 0;
+      for(let i = recentStart; i < n; i++){
+        recentSum += shotScores[i];
+      }
+      
+      const rankInfo = getRankInfo(recentSum);
+      
+      // 显示成绩预览画面
+      showScorePreview(rankInfo, recentSum, true); // true表示自动弹出，会有撒花
+    }
+
+    // ✅ 显示成绩预览画面
+    function showScorePreview(rankInfo, recentSum, autoPopup = false){
+      const celebTrophy = document.getElementById('celebTrophy');
+      const celebTitle = document.getElementById('celebTitle');
+      const celebScores = document.getElementById('celebScores');
+      const celebTimestamp = document.getElementById('celebTimestamp');
+      
+      celebTrophy.textContent = rankInfo.emoji;
+      celebTitle.textContent = rankInfo.title;
+      celebTitle.style.color = rankInfo.color;
+      
+      const n = shotScores.length;
+      const avg = shotScores.reduce((a,b)=>a+b,0) / n;
+      const maxScore = Math.max(...shotScores);
+      
+      celebScores.innerHTML = `
+        <div class="scoreItem">总发数: ${n}</div>
+        <div class="scoreItem">最近10发总分: ${recentSum.toFixed(1)}</div>
+        <div class="scoreItem">平均分: ${avg.toFixed(2)}</div>
+        <div class="scoreItem">最高单发: ${maxScore.toFixed(1)}</div>
+      `;
+      
+      const now = new Date();
+      celebTimestamp.textContent = now.toLocaleDateString('zh-CN');
+      
+      celebration.classList.add('show');
+      
+      // 如果是自动弹出（打满10发），添加撒花效果
+      if(autoPopup && recentSum >= 105){
+        for(let i = 0; i < 50; i++){
+          setTimeout(()=>{
+            const confetti = document.createElement('div');
+            confetti.className = 'confetti';
+            confetti.style.left = Math.random() * 100 + '%';
+            confetti.style.top = '-10px';
+            confetti.style.background = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'][Math.floor(Math.random()*5)];
+            confetti.style.animationDelay = Math.random() * 0.5 + 's';
+            celebration.appendChild(confetti);
+            
+            setTimeout(()=>confetti.remove(), 3000);
+          }, i * 30);
+        }
+
+        // 庆祝音效
+        try{
+          const ac = new (window.AudioContext||window.webkitAudioContext)();
+          [440, 554, 659, 880].forEach((freq, i)=>{
+            setTimeout(()=>{
+              const o = ac.createOscillator();
+              const g = ac.createGain();
+              o.type='sine';
+              o.frequency.value=freq;
+              g.gain.value=0.1;
+              o.connect(g); g.connect(ac.destination);
+              o.start();
+              setTimeout(()=>{o.stop();}, 200);
+            }, i * 150);
+          });
+          setTimeout(()=>ac.close(), 1000);
+        }catch{}
+
+        // 3秒后自动关闭
+        setTimeout(()=>{
+          celebration.classList.remove('show');
+        }, 3000);
+      }
+    }
+
+    // ✅ 分享成绩功能 - 显示预览画面
     async function shareScore(){
+      const n = shotScores.length;
+      if(n === 0){
+        alert('还没有成绩记录');
+        return;
+      }
+      
+      // 计算最近10发
+      const recentStart = Math.max(0, n - 10);
+      let recentSum = 0;
+      for(let i = recentStart; i < n; i++){
+        recentSum += shotScores[i];
+      }
+      const recentCount = n - recentStart;
+      
+      if(recentCount < 10){
+        alert('至少需要打满10发才能分享完整成绩');
+        return;
+      }
+      
+      const rankInfo = getRankInfo(recentSum);
+      showScorePreview(rankInfo, recentSum, false); // false表示手动点击，不自动关闭
+    }
+
+    // ✅ 保存成绩图片
+    async function saveScoreImage(){
       try{
         // 创建临时canvas合成截图
         const shareCanvas = document.createElement('canvas');
@@ -558,72 +693,41 @@
         shareCtx.textAlign = 'left';
         
         const n = shotScores.length;
-        if(n === 0){
-          shareCtx.fillText('还没有成绩记录', 150, 250);
-        }else{
-          let y = 220;
-          shareCtx.fillText(`总发数: ${n}`, 150, y);
-          y += 50;
+        let y = 220;
+        shareCtx.fillText(`总发数: ${n}`, 150, y);
+        y += 50;
 
-          // 最近10发
-          const recentStart = Math.max(0, n - 10);
-          let recentSum = 0;
-          for(let i = recentStart; i < n; i++){
-            recentSum += shotScores[i];
-          }
-          const recentCount = n - recentStart;
-          
-          if(recentCount === 10){
-            shareCtx.fillText(`最近10发总分: ${recentSum.toFixed(1)}`, 150, y);
-            y += 50;
-            
-            // ✅ 根据分数显示评价
-            let comment = '';
-            let commentColor = '#333';
-            
-            if(recentSum < 90){
-              comment = '没什么天赋';
-              commentColor = '#999';
-            }else if(recentSum < 97){
-              comment = '有点菜了';
-              commentColor = '#FF6B6B';
-            }else if(recentSum < 100){
-              comment = '一般般';
-              commentColor = '#FFA500';
-            }else if(recentSum < 102){
-              comment = '有点厉害';
-              commentColor = '#4ECDC4';
-            }else if(recentSum < 105){
-              comment = '有望冲击奥运';
-              commentColor = '#45B7D1';
-            }else if(recentSum < 106){
-              comment = '🏆 奥运选手！';
-              commentColor = '#FFD700';
-            }else if(recentSum < 109){
-              comment = '🏆 奥运冠军';
-              commentColor = '#FFD700';
-            }else{
-              comment = '🏆 奥运冠军';
-              commentColor = '#FFD700';
-            }
-            
-            shareCtx.fillStyle = commentColor;
-            shareCtx.font = 'bold 48px system-ui';
-            shareCtx.fillText(comment, 150, y);
-            shareCtx.fillStyle = '#333';
-            shareCtx.font = 'bold 32px system-ui';
-            y += 60;
-          }
-
-          // 平均分
-          const avg = shotScores.reduce((a,b)=>a+b,0) / n;
-          shareCtx.fillText(`平均分: ${avg.toFixed(2)}`, 150, y);
-          y += 50;
-
-          // 最高分
-          const maxScore = Math.max(...shotScores);
-          shareCtx.fillText(`最高单发: ${maxScore.toFixed(1)}`, 150, y);
+        // 最近10发
+        const recentStart = Math.max(0, n - 10);
+        let recentSum = 0;
+        for(let i = recentStart; i < n; i++){
+          recentSum += shotScores[i];
         }
+        const recentCount = n - recentStart;
+        
+        if(recentCount === 10){
+          shareCtx.fillText(`最近10发总分: ${recentSum.toFixed(1)}`, 150, y);
+          y += 50;
+          
+          // ✅ 根据分数显示评价
+          const rankInfo = getRankInfo(recentSum);
+          
+          shareCtx.fillStyle = rankInfo.color;
+          shareCtx.font = 'bold 48px system-ui';
+          shareCtx.fillText(`${rankInfo.emoji} ${rankInfo.title}`, 150, y);
+          shareCtx.fillStyle = '#333';
+          shareCtx.font = 'bold 32px system-ui';
+          y += 60;
+        }
+
+        // 平均分
+        const avg = shotScores.reduce((a,b)=>a+b,0) / n;
+        shareCtx.fillText(`平均分: ${avg.toFixed(2)}`, 150, y);
+        y += 50;
+
+        // 最高分
+        const maxScore = Math.max(...shotScores);
+        shareCtx.fillText(`最高单发: ${maxScore.toFixed(1)}`, 150, y);
 
         // 时间戳
         shareCtx.fillStyle = '#999';
