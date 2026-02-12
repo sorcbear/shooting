@@ -69,11 +69,11 @@
       font:11px/1.3 ui-monospace,monospace;
       color:#000; background:rgba(255,255,255,0.9);
       border:1px solid #999; border-radius:6px;
-      padding:8px; max-width:200px;
+      padding:8px; max-width:240px;
       display:none;
     }
 
-    /* ✅ 分享按钮（右上角 / 直角 / 纯黑底白字 / 白色分享箭头） */
+    /* 分享按钮（右上角 / 直角 / 黑底白字 / 白色分享箭头） */
     #shareBtn{
       position:absolute; top:16px; right:16px; z-index:6;
       background:#000; color:#fff;
@@ -102,11 +102,10 @@
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M16 8l-4-4-4 4h3v6h2V8h3z'/%3E%3Cpath fill='white' d='M5 14h2v5h10v-5h2v7H5v-7z'/%3E%3C/svg%3E");
     }
 
-    /* ✅ 每10发称号全屏展示（3秒） */
+    /* 每10发称号全屏展示（3秒，黑底白字） */
     #celebration{
       position:absolute; inset:0; z-index:10;
-      background:#000;
-      color:#fff;
+      background:#000; color:#fff;
       display:none;
       align-items:center; justify-content:center;
       text-align:center;
@@ -129,49 +128,33 @@
       opacity:0.88;
     }
 
-    /* ✅ 分享预览层：背景纯白+黑字，横屏不裁按钮 */
-    #sharePreview{
-      position:absolute; inset:0; z-index:20;
-      display:none;
-    }
+    /* 分享预览层（白底黑字，横屏不裁按钮） */
+    #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
     #sharePreview.show{ display:block; }
+    #sharePreview .sp-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.55); }
 
-    #sharePreview .sp-backdrop{
-      position:absolute; inset:0;
-      background:rgba(0,0,0,0.55);
-    }
-
-    /* 默认：居中弹窗 */
     #sharePreview .sp-panel{
-      position:absolute;
-      left:50%; top:50%;
+      position:absolute; left:50%; top:50%;
       transform:translate(-50%,-50%);
       width:min(92vw, 860px);
       max-height:92vh;
-      background:#fff;                 /* ✅ 白底 */
-      color:#000;                      /* ✅ 黑字 */
+      background:#fff; color:#000;
       border:1px solid rgba(0,0,0,0.16);
       box-shadow:0 10px 30px rgba(0,0,0,0.35);
-      display:flex;
-      flex-direction:column;
-      overflow:hidden;                 /* ✅ 防止内部溢出影响按钮 */
+      display:flex; flex-direction:column;
+      overflow:hidden;
     }
-
     #sharePreview .sp-top{
       flex:0 0 auto;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
+      display:flex; align-items:center; justify-content:space-between;
       padding:12px 14px;
       border-bottom:1px solid rgba(0,0,0,0.10);
       background:#fff;
     }
-
     #sharePreview .sp-title{
       color:#000;
       font:800 16px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     }
-
     #sharePreview .sp-close{
       appearance:none;
       background:#fff;
@@ -182,11 +165,9 @@
       font:900 22px/1 system-ui;
       cursor:pointer;
     }
-
-    /* 关键：让中间区域吃掉剩余高度，并滚动 */
     #sharePreview .sp-body{
       flex:1 1 auto;
-      min-height:0;                    /* ✅ iOS/横屏必备：允许内部滚动 */
+      min-height:0;
       padding:12px;
       overflow:auto;
       background:#fff;
@@ -194,18 +175,15 @@
       align-items:center;
       justify-content:center;
     }
-
     #sharePreview .sp-body img{
       display:block;
       width:100%;
       height:auto;
-      max-height:100%;                 /* ✅ 不再用 70vh，避免横屏裁切 */
+      max-height:100%;
       object-fit:contain;
-      background:#000;                 /* ✅ 图片本身黑底（你生成图就是黑底） */
+      background:#000; /* 图片本身黑底（你生成图） */
       border:1px solid rgba(0,0,0,0.12);
     }
-
-    /* 底部按钮栏永远可见 */
     #sharePreview .sp-actions{
       flex:0 0 auto;
       display:flex;
@@ -214,9 +192,8 @@
       border-top:1px solid rgba(0,0,0,0.10);
       justify-content:flex-end;
       background:#fff;
-      padding-bottom:calc(12px + env(safe-area-inset-bottom)); /* ✅ iOS 底部安全区 */
+      padding-bottom:calc(12px + env(safe-area-inset-bottom));
     }
-
     #sharePreview .sp-btn{
       border-radius:0;
       padding:10px 14px;
@@ -227,15 +204,11 @@
       color:#000;
     }
     #sharePreview .sp-btn:hover{ background:#f3f3f3; }
-
     #sharePreview .sp-primary{
-      background:#000;                 /* ✅ 主按钮黑底白字 */
-      color:#fff;
-      border-color:#000;
+      background:#000; color:#fff; border-color:#000;
     }
     #sharePreview .sp-primary:hover{ background:#111; }
 
-    /* ✅ 横屏/矮屏：改为贴边面板，确保按钮不裁切 */
     @media (orientation: landscape), (max-height: 520px){
       #sharePreview .sp-panel{
         left:12px; right:12px; top:12px; bottom:12px;
@@ -264,7 +237,6 @@
         </div>
       </div>
 
-      <!-- ✅ 分享预览层 -->
       <div id="sharePreview" aria-hidden="true">
         <div class="sp-backdrop"></div>
         <div class="sp-panel" role="dialog" aria-modal="true">
@@ -272,11 +244,9 @@
             <div class="sp-title">分享图片预览</div>
             <button class="sp-close" id="spClose" aria-label="关闭预览">×</button>
           </div>
-
           <div class="sp-body">
             <img id="spImg" alt="成绩分享图预览" />
           </div>
-
           <div class="sp-actions">
             <button class="sp-btn" id="spBack">返回</button>
             <button class="sp-btn sp-primary" id="spDownload">下载</button>
@@ -315,19 +285,22 @@
     const celeTitle = document.getElementById('celeTitle');
     const celeSub = document.getElementById('celeSub');
 
-    // ✅ 分享预览层 DOM
+    // Share preview DOM
     const sharePreview = document.getElementById('sharePreview');
     const spImg = document.getElementById('spImg');
     const spClose = document.getElementById('spClose');
     const spBack = document.getElementById('spBack');
     const spDownload = document.getElementById('spDownload');
-
     let spBlobUrl = null;
     let spDownloadName = '';
 
-    // 调试模式开关
+    // Debug
     const DEBUG_MODE = false;
     if(DEBUG_MODE) debugInfo.style.display = 'block';
+
+    // Modes
+    const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', PLAY:'PLAY' };
+    let mode = MODE.WAIT_BOTH;
 
     // Canvas size
     let W=0,H=0,DPR=1,cx=0,cy=0;
@@ -349,10 +322,10 @@
 
     function tuneAimByDevice(){
       const phone = isIPhoneLike();
-      followAlpha = phone ? 0.995 : 0.965;
+      followAlpha = phone ? 1 : 0.965;
 
       const REF_SHORT = 390;
-      const baseGainPhone = 3.15;
+      const baseGainPhone = 5;
       const baseGainPad   = 1.85;
       const base = phone ? baseGainPhone : baseGainPad;
 
@@ -397,9 +370,7 @@
       return videoReady;
     }
 
-    // States
-    const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', PLAY:'PLAY' };
-    let mode = MODE.WAIT_BOTH;
+    // State flags
     let firstShotDone = false;
     let lockReady = false;
 
@@ -414,7 +385,7 @@
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
-    // Lock
+    // Lock for calibration phase ONLY
     const LOCK_DIST_PX = 38;
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
@@ -484,7 +455,6 @@
         for(let i = end - 1; i >= start; i--){
           out += `${i+1}.  ${shotScores[i].toFixed(1)}\n`;
         }
-
         out += '\n';
       }
 
@@ -497,7 +467,7 @@
 
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
-      x = 1 - x;
+      x = 1 - x; // mirror
       let px = x * W;
       let py = y * H;
       px = cx + (px - cx) * sensitivity;
@@ -511,7 +481,6 @@
       ctx.fillRect(0,0,W,H);
 
       const half = targetSquareHalf * DPR;
-
       ctx.fillStyle = '#fff';
       ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
 
@@ -545,7 +514,8 @@
       ctx.stroke();
     }
 
-    function drawGuideOverlay(haveLeft, haveRight){
+    // ✅ 只在“看不见准星/没有双手/视频未就绪”时显示提示
+    function drawGuideOverlay(haveLeft, haveRight, haveSight){
       const half = targetSquareHalf * DPR;
       const boxY = cy - half;
       const boxW = 2*half;
@@ -557,13 +527,17 @@
       let msg = '';
       if(!videoReady){
         msg = '等待摄像头画面…';
-      }else if(!haveLeft || !haveRight || !lockReady){
+      }else if(!haveLeft || !haveRight || !haveSight){
         msg = '移动双手位置\n直到露出瞄准器';
       }else if(!firstShotDone){
-        msg = '已锁定 ✅\n捏合打一发校准发（不计分）';
+        // 校准阶段：仍然要锁靶心
+        if(!lockReady) msg = '请对准靶心\n保持一下';
+        else msg = '已锁定 ✅\n捏合打一发校准发（不计分）';
       }else{
-        msg = 'READY ✅\n完全捏合开火';
+        // PLAY 阶段不显示任何提示（只要有准星）
+        msg = '';
       }
+      if(!msg) return;
 
       const lines = msg.split('\n');
 
@@ -600,11 +574,10 @@
         const yy = by + padY + lh/2 + i*lh;
         ctx.fillText(lines[i], cx, yy);
       }
-
       ctx.restore();
     }
 
-    function render(haveLeft, haveRight){
+    function render(haveLeft, haveRight, haveSight){
       drawTarget();
 
       const now = Date.now();
@@ -612,7 +585,8 @@
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
 
-      if(mode !== MODE.PLAY) drawGuideOverlay(haveLeft, haveRight);
+      // ✅ 只要需要才画提示
+      drawGuideOverlay(haveLeft, haveRight, haveSight);
     }
 
     function beep(){
@@ -629,7 +603,7 @@
       }catch{}
     }
 
-    // ✅ 分享预览层：打开/关闭
+    // Share preview open/close
     function openSharePreview(blob){
       if(spBlobUrl){
         URL.revokeObjectURL(spBlobUrl);
@@ -654,11 +628,11 @@
       spImg.src = '';
     }
 
-    document.getElementById('spClose').addEventListener('click', closeSharePreview);
-    document.getElementById('spBack').addEventListener('click', closeSharePreview);
+    spClose.addEventListener('click', closeSharePreview);
+    spBack.addEventListener('click', closeSharePreview);
     sharePreview.querySelector('.sp-backdrop').addEventListener('click', closeSharePreview);
 
-    document.getElementById('spDownload').addEventListener('click', ()=>{
+    spDownload.addEventListener('click', ()=>{
       if(!spBlobUrl) return;
       const a = document.createElement('a');
       a.href = spBlobUrl;
@@ -666,7 +640,6 @@
       a.click();
     });
 
-    // ✅ 分享成绩：生成图后先预览，不自动下载
     async function shareScore(){
       try{
         const shareCanvas = document.createElement('canvas');
@@ -677,21 +650,17 @@
         shareCanvas.width = width;
         shareCanvas.height = height;
 
-        // ✅ 纯黑背景（图本身黑底）
         shareCtx.fillStyle = '#000';
         shareCtx.fillRect(0, 0, width, height);
 
-        // 标题
         shareCtx.fillStyle = '#fff';
         shareCtx.font = '900 60px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
         shareCtx.textAlign = 'center';
         shareCtx.fillText('🎯 Air Finger Rifle', width/2, 100);
 
-        // 成绩板背景
         shareCtx.fillStyle = 'rgba(255,255,255,0.95)';
         shareCtx.fillRect(100, 150, width-200, height-200);
 
-        // 成绩内容
         shareCtx.fillStyle = '#333';
         shareCtx.font = '800 32px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
         shareCtx.textAlign = 'left';
@@ -704,7 +673,6 @@
           shareCtx.fillText(`总发数: ${n}`, 150, y);
           y += 50;
 
-          // 最近10发
           const recentStart = Math.max(0, n - 10);
           let recentSum = 0;
           for(let i = recentStart; i < n; i++) recentSum += shotScores[i];
@@ -714,54 +682,43 @@
             shareCtx.fillText(`最近10发总分: ${recentSum.toFixed(1)}`, 150, y);
             y += 58;
 
-            // ✅ 称号
             const title = titleByTenSum(recentSum);
             shareCtx.fillStyle = '#000';
             shareCtx.font = '900 54px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
             shareCtx.fillText(title, 150, y);
             y += 64;
 
-            // 还原字体
             shareCtx.fillStyle = '#333';
             shareCtx.font = '800 32px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
           }
 
-          // 平均分
           const avg = shotScores.reduce((a,b)=>a+b,0) / n;
           shareCtx.fillText(`平均分: ${avg.toFixed(2)}`, 150, y);
           y += 50;
 
-          // 最高分
           const maxScore = Math.max(...shotScores);
           shareCtx.fillText(`最高单发: ${maxScore.toFixed(1)}`, 150, y);
         }
 
-        // 时间戳
         shareCtx.fillStyle = '#999';
         shareCtx.font = '24px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
         shareCtx.textAlign = 'center';
         const now = new Date();
         shareCtx.fillText(now.toLocaleDateString('zh-CN'), width/2, height-40);
 
-        // 生成 -> 预览
         shareCanvas.toBlob((blob)=>{
-          if(!blob){
-            alert('生成图片失败');
-            return;
-          }
+          if(!blob){ alert('生成图片失败'); return; }
           openSharePreview(blob);
         }, 'image/png');
-
       }catch(e){
         console.error('分享失败:', e);
         alert('分享功能暂时不可用');
       }
     }
-
     shareBtn.addEventListener('click', shareScore);
 
     // ========================================
-    // 捏合识别系统（保持不变）
+    // Pinch system
     // ========================================
     let isPinched = false;
     let triggerLocked = false;
@@ -770,7 +727,6 @@
 
     const PINCH_DISTANCE_ON  = 0.35;
     const PINCH_DISTANCE_OFF = 0.42;
-    const PINCH_Z_DIFF_MAX = 0.15;
 
     const PINCH_ON_FRAMES  = 1;
     const PINCH_OFF_FRAMES = 2;
@@ -788,8 +744,7 @@
     }
     function getPinchDistanceSmoothed(){
       if(pinchDistanceHistory.length === 0) return 999;
-      const sum = pinchDistanceHistory.reduce((a,b)=>a+b, 0);
-      return sum / pinchDistanceHistory.length;
+      return pinchDistanceHistory.reduce((a,b)=>a+b,0) / pinchDistanceHistory.length;
     }
     function distance3D(p1, p2){
       const dx = p1.x - p2.x;
@@ -831,8 +786,7 @@
       hintEl.textContent = '左手"完全捏合"=开枪';
     }
 
-    const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', PLAY:'PLAY' };
-
+    // MediaPipe
     function getHandIndexByLabel(hdList, label){
       for(let i=0;i<hdList.length;i++){
         if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
@@ -840,12 +794,13 @@
       return -1;
     }
 
+    // ✅ 校准后允许在任何位置击发：processFrame 不再被 lockReady 卡死
     function processFrame(leftLm, rightLm){
       const now = Date.now();
       if(now < freezeUntil) return;
       if(!videoReady) return;
 
-      // right hand aim
+      // right hand aim (need right hand landmarks)
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
@@ -855,7 +810,7 @@
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
-      // left hand pinch
+      // Left pinch
       const lThumb = leftLm[4];
       const lIndex = leftLm[8];
       const wrist  = leftLm[0];
@@ -865,12 +820,22 @@
       const palmSize = Math.max(1e-6, distance3D(wrist, iMcp));
       const pinchRatio = tipDist3D / palmSize;
 
-      const zDiff = Math.abs((lThumb.z || 0) - (lIndex.z || 0));
-
       addToPinchHistory(pinchRatio);
       const smoothedRatio = getPinchDistanceSmoothed();
 
-      if(!lockReady){
+      if(DEBUG_MODE){
+        debugInfo.innerHTML = `
+mode: ${mode}
+firstShotDone: ${firstShotDone}
+lockReady: ${lockReady}
+aim: ${aimX? 'yes':'no'}
+pinch: ${smoothedRatio.toFixed(3)}
+triggerLocked: ${triggerLocked}
+        `.trim();
+      }
+
+      // ✅ 只有“校准前”才要求 lockReady
+      if(!firstShotDone && !lockReady){
         isPinched = false;
         triggerLocked = false;
         pinchOnCount = pinchOffCount = 0;
@@ -879,7 +844,7 @@
       }
 
       if(triggerLocked){
-        if(smoothedRatio > PINCH_DISTANCE_OFF && zDiff < PINCH_Z_DIFF_MAX){
+        if(smoothedRatio > PINCH_DISTANCE_OFF){
           pinchOffCount++;
           if(pinchOffCount >= PINCH_OFF_FRAMES){
             triggerLocked = false;
@@ -919,10 +884,8 @@
       }
     }
 
-    const LOCK_DIST_PX = 38;
-    const LOCK_FRAMES_NEED = 24;
-
-    function updateLockState(haveLeft, haveRight){
+    // ✅ 校准前需要锁靶心；校准后：只要有准星就 PLAY
+    function updateLockState(haveLeft, haveRight, haveSight){
       if(!videoReady){
         lockFrames = 0;
         lockReady = false;
@@ -933,41 +896,49 @@
         return;
       }
 
-      if(!haveLeft || !haveRight){
+      // 丢手：回到等待
+      if(!haveLeft || !haveRight || !haveSight){
         lockFrames = 0;
         lockReady = false;
-        firstShotDone = false;
-        mode = MODE.WAIT_BOTH;
 
-        statusEl.textContent = '等待双手...';
-        hintEl.textContent = '右手食指瞄准，左手完全捏合开火';
+        if(firstShotDone){
+          // ✅ 校准后：只在“看不见准星”时提示，不强制回退到校准
+          mode = MODE.PLAY;
+          statusEl.textContent = 'READY ✅';
+          hintEl.textContent = '看不见准星时再调整双手';
+        }else{
+          mode = MODE.WAIT_BOTH;
+          statusEl.textContent = '等待双手...';
+          hintEl.textContent = '右手食指瞄准，左手完全捏合开火';
+        }
 
-        video.style.opacity = '1';
-        video.style.pointerEvents = 'auto';
+        // 校准前允许显示视频；校准后视频保持隐藏（你原逻辑）
+        if(!firstShotDone){
+          video.style.opacity = '1';
+          video.style.pointerEvents = 'auto';
+        }
         return;
       }
 
-      if(aimX==null){
-        lockFrames = 0;
-        lockReady = false;
+      // 有双手+准星
+      if(firstShotDone){
+        mode = MODE.PLAY;
+        lockReady = true; // 不再限制
+        statusEl.textContent = 'READY ✅';
+        hintEl.textContent = '左手"完全捏合"=开枪';
         return;
       }
 
+      // 校准前：仍然要锁靶心
       const d = Math.hypot(aimX-cx, aimY-cy);
       const locked = d <= (LOCK_DIST_PX * DPR);
       if(locked) lockFrames++; else lockFrames=0;
 
       if(lockFrames >= LOCK_FRAMES_NEED){
         lockReady = true;
-        if(!firstShotDone){
-          mode = MODE.READY;
-          statusEl.textContent = '已锁定 ✅ 校准发不计分';
-          hintEl.textContent = '左手需要"完全捏合"才会击发';
-        }else{
-          mode = MODE.PLAY;
-          statusEl.textContent = 'READY ✅';
-          hintEl.textContent = '左手"完全捏合"=开枪';
-        }
+        mode = MODE.READY;
+        statusEl.textContent = '已锁定 ✅ 校准发不计分';
+        hintEl.textContent = '左手需要"完全捏合"才会击发';
       }else{
         lockReady = false;
         mode = MODE.READY;
@@ -993,6 +964,9 @@
       statusEl.textContent = '请求摄像头...';
       resizeTwice();
 
+      // ✅ 先画一个靶子，避免任何初始化延迟导致“黑屏无内容”
+      render(false,false,false);
+
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
       hands.setOptions({
         maxNumHands:2,
@@ -1008,25 +982,29 @@
         const hd = res.multiHandedness||[];
         const lIdx = getHandIndexByLabel(hd, 'Left');
         const rIdx = getHandIndexByLabel(hd, 'Right');
-        const hL = lIdx!==-1 && lm[lIdx], hR = rIdx!==-1 && lm[rIdx];
 
-        if(!hL || !hR){
+        const haveLeft = (lIdx!==-1 && lm[lIdx]);
+        const haveRight = (rIdx!==-1 && lm[rIdx]);
+
+        // 没双手：清空准星，显示提示
+        if(!haveLeft || !haveRight){
           aimX = aimY = null;
           isPinched = false;
           triggerLocked = false;
           pinchOnCount = pinchOffCount = 0;
           pinchDistanceHistory = [];
 
-          updateLockState(false,false);
-          render(false,false);
+          updateLockState(!!haveLeft, !!haveRight, false);
+          render(!!haveLeft, !!haveRight, false);
           return;
         }
 
-        if(mode===MODE.WAIT_BOTH) mode=MODE.READY;
-
+        // 处理帧（会更新 aimX/aimY）
         processFrame(lm[lIdx], lm[rIdx]);
-        updateLockState(true,true);
-        render(true,true);
+
+        const haveSight = (aimX!=null && aimY!=null);
+        updateLockState(true,true, haveSight);
+        render(true,true, haveSight);
       });
 
       video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
@@ -1056,6 +1034,8 @@
     start().catch(e=>{
       console.error(e);
       statusEl.textContent='启动失败: 请检查摄像头权限或HTTPS连接';
+      // 失败也画靶子
+      render(false,false,false);
     });
   </script>
 </body>
