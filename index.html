@@ -329,10 +329,10 @@
 
     function tuneAimByDevice(){
       const phone = isIPhoneLike();
-      followAlpha = phone ? 0.995 : 0.965;
+      followAlpha = phone ? 1 : 0.965;
 
       const REF_SHORT = 390;
-      const baseGainPhone = 3.15;
+      const baseGainPhone = 3.5;
       const baseGainPad   = 1.85;
       const base = phone ? baseGainPhone : baseGainPad;
 
