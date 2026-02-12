@@ -73,6 +73,69 @@
       padding:8px; max-width:200px;
       display:none; /* 默认隐藏，可通过JS开启 */
     }
+    /* 分享按钮 */
+    #shareBtn{
+      position:absolute; bottom:16px; right:16px; z-index:4;
+      background:#007AFF; color:#fff;
+      border:none; border-radius:12px;
+      padding:12px 24px; font-size:16px; font-weight:600;
+      cursor:pointer; box-shadow:0 4px 12px rgba(0,122,255,0.3);
+      transition:all 0.2s;
+    }
+    #shareBtn:hover{
+      background:#0051D5; transform:translateY(-2px);
+      box-shadow:0 6px 16px rgba(0,122,255,0.4);
+    }
+    #shareBtn:active{
+      transform:translateY(0);
+    }
+    /* 奥运庆祝画面 */
+    #celebration{
+      position:absolute; inset:0; z-index:10;
+      background:rgba(255,255,255,0.95);
+      display:none; /* 默认隐藏 */
+      flex-direction:column;
+      align-items:center; justify-content:center;
+      animation:fadeIn 0.3s ease-out;
+    }
+    #celebration.show{
+      display:flex;
+    }
+    @keyframes fadeIn{
+      from{opacity:0; transform:scale(0.9);}
+      to{opacity:1; transform:scale(1);}
+    }
+    #celebration .trophy{
+      font-size:120px; margin-bottom:20px;
+      animation:bounce 0.6s ease-in-out infinite;
+    }
+    @keyframes bounce{
+      0%, 100%{transform:translateY(0);}
+      50%{transform:translateY(-20px);}
+    }
+    #celebration .title{
+      font:900 48px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:#FFD700; text-shadow:2px 2px 4px rgba(0,0,0,0.2);
+      margin-bottom:12px;
+    }
+    #celebration .subtitle{
+      font:600 24px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:#333;
+    }
+    /* 撒花动画 */
+    .confetti{
+      position:absolute; width:10px; height:10px;
+      background:#FFD700; opacity:0;
+      animation:confettiFall 3s ease-out forwards;
+    }
+    @keyframes confettiFall{
+      0%{
+        opacity:1; transform:translateY(0) rotate(0deg);
+      }
+      100%{
+        opacity:0; transform:translateY(100vh) rotate(720deg);
+      }
+    }
   </style>
 </head>
 
@@ -83,6 +146,14 @@
       <canvas id="cv"></canvas>
       <div id="flash"></div>
       <div id="debugInfo"></div>
+      <button id="shareBtn">📸 分享成绩</button>
+      
+      <!-- 奥运庆祝画面 -->
+      <div id="celebration">
+        <div class="trophy">🏆</div>
+        <div class="title">奥运选手！</div>
+        <div class="subtitle">10发总分 105+</div>
+      </div>
     </div>
 
     <div id="rightPane">
@@ -109,9 +180,11 @@
     const flashEl = document.getElementById('flash');
     const hintEl = document.getElementById('hint');
     const debugInfo = document.getElementById('debugInfo');
+    const shareBtn = document.getElementById('shareBtn');
+    const celebration = document.getElementById('celebration');
 
     // 调试模式开关（改为true可显示实时捏合数据）
-    const DEBUG_MODE = true;  // 先开启调试，看实际数值
+    const DEBUG_MODE = false;  // 关闭调试
     if(DEBUG_MODE) debugInfo.style.display = 'block';
 
     // Canvas size
@@ -222,6 +295,8 @@
 
     // Scores
     let shotScores = [];
+    let lastCelebrationCheck = 0; // 记录上次检查，避免重复触发
+
     function renderScores(){
       const n = shotScores.length;
       if(n === 0){
@@ -242,6 +317,12 @@
         }
 
         out += `Total(${start+1}-${end}): ${sum.toFixed(1)}\n`;
+
+        // ✅ 检测奥运选手成就（10发总分105+）
+        if(end - start === 10 && sum >= 105 && end > lastCelebrationCheck){
+          lastCelebrationCheck = end;
+          triggerOlympicCelebration();
+        }
 
         for(let i = end - 1; i >= start; i--){
           out += `${i+1}.  ${shotScores[i].toFixed(1)}\n`;
@@ -392,6 +473,171 @@
       }catch{}
     }
 
+    // ✅ 奥运选手庆祝动画
+    function triggerOlympicCelebration(){
+      celebration.classList.add('show');
+      
+      // 撒花效果
+      for(let i = 0; i < 50; i++){
+        setTimeout(()=>{
+          const confetti = document.createElement('div');
+          confetti.className = 'confetti';
+          confetti.style.left = Math.random() * 100 + '%';
+          confetti.style.top = '-10px';
+          confetti.style.background = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'][Math.floor(Math.random()*5)];
+          confetti.style.animationDelay = Math.random() * 0.5 + 's';
+          celebration.appendChild(confetti);
+          
+          setTimeout(()=>confetti.remove(), 3000);
+        }, i * 30);
+      }
+
+      // 庆祝音效
+      try{
+        const ac = new (window.AudioContext||window.webkitAudioContext)();
+        [440, 554, 659, 880].forEach((freq, i)=>{
+          setTimeout(()=>{
+            const o = ac.createOscillator();
+            const g = ac.createGain();
+            o.type='sine';
+            o.frequency.value=freq;
+            g.gain.value=0.1;
+            o.connect(g); g.connect(ac.destination);
+            o.start();
+            setTimeout(()=>{o.stop();}, 200);
+          }, i * 150);
+        });
+        setTimeout(()=>ac.close(), 1000);
+      }catch{}
+
+      // 3秒后恢复
+      setTimeout(()=>{
+        celebration.classList.remove('show');
+      }, 3000);
+    }
+
+    // ✅ 分享成绩功能
+    async function shareScore(){
+      try{
+        // 创建临时canvas合成截图
+        const shareCanvas = document.createElement('canvas');
+        const shareCtx = shareCanvas.getContext('2d');
+        
+        // 设置canvas尺寸（适合社交媒体分享）
+        const width = 1200;
+        const height = 630;
+        shareCanvas.width = width;
+        shareCanvas.height = height;
+
+        // 背景渐变
+        const gradient = shareCtx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, '#667eea');
+        gradient.addColorStop(1, '#764ba2');
+        shareCtx.fillStyle = gradient;
+        shareCtx.fillRect(0, 0, width, height);
+
+        // 标题
+        shareCtx.fillStyle = '#fff';
+        shareCtx.font = 'bold 60px system-ui';
+        shareCtx.textAlign = 'center';
+        shareCtx.fillText('🎯 Air Finger Rifle', width/2, 100);
+
+        // 成绩板背景
+        shareCtx.fillStyle = 'rgba(255,255,255,0.95)';
+        shareCtx.fillRect(100, 150, width-200, height-200);
+
+        // 成绩内容
+        shareCtx.fillStyle = '#333';
+        shareCtx.font = 'bold 32px system-ui';
+        shareCtx.textAlign = 'left';
+        
+        const n = shotScores.length;
+        if(n === 0){
+          shareCtx.fillText('还没有成绩记录', 150, 250);
+        }else{
+          let y = 220;
+          shareCtx.fillText(`总发数: ${n}`, 150, y);
+          y += 50;
+
+          // 最近10发
+          const recentStart = Math.max(0, n - 10);
+          let recentSum = 0;
+          for(let i = recentStart; i < n; i++){
+            recentSum += shotScores[i];
+          }
+          const recentCount = n - recentStart;
+          
+          if(recentCount === 10){
+            shareCtx.fillText(`最近10发总分: ${recentSum.toFixed(1)}`, 150, y);
+            y += 50;
+            
+            if(recentSum >= 105){
+              shareCtx.fillStyle = '#FFD700';
+              shareCtx.font = 'bold 48px system-ui';
+              shareCtx.fillText('🏆 奥运选手级别！', 150, y);
+              shareCtx.fillStyle = '#333';
+              shareCtx.font = 'bold 32px system-ui';
+              y += 60;
+            }
+          }
+
+          // 平均分
+          const avg = shotScores.reduce((a,b)=>a+b,0) / n;
+          shareCtx.fillText(`平均分: ${avg.toFixed(2)}`, 150, y);
+          y += 50;
+
+          // 最高分
+          const maxScore = Math.max(...shotScores);
+          shareCtx.fillText(`最高单发: ${maxScore.toFixed(1)}`, 150, y);
+        }
+
+        // 时间戳
+        shareCtx.fillStyle = '#999';
+        shareCtx.font = '24px system-ui';
+        shareCtx.textAlign = 'center';
+        const now = new Date();
+        shareCtx.fillText(now.toLocaleDateString('zh-CN'), width/2, height-40);
+
+        // 转换为blob并分享/下载
+        shareCanvas.toBlob(async(blob)=>{
+          const file = new File([blob], 'finger-rifle-score.png', {type: 'image/png'});
+          
+          // 尝试使用Web Share API
+          if(navigator.share && navigator.canShare && navigator.canShare({files: [file]})){
+            try{
+              await navigator.share({
+                files: [file],
+                title: 'Air Finger Rifle 成绩',
+                text: `我的射击成绩：${n}发，平均${(shotScores.reduce((a,b)=>a+b,0)/n).toFixed(2)}分！`
+              });
+            }catch(e){
+              // 用户取消分享或不支持，降级到下载
+              downloadImage(blob);
+            }
+          }else{
+            // 不支持分享API，直接下载
+            downloadImage(blob);
+          }
+        }, 'image/png');
+
+      }catch(e){
+        console.error('分享失败:', e);
+        alert('分享功能暂时不可用');
+      }
+    }
+
+    function downloadImage(blob){
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `finger-rifle-${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // 绑定分享按钮
+    shareBtn.addEventListener('click', shareScore);
+
     // ========================================
     // ✅ 改进的捏合识别系统
     // ========================================
@@ -402,19 +648,19 @@
     let lastShotTs = 0;
 
     // ✅ OK手势捏合检测（拇指+食指尖接触，其他手指握拳）
-    const PINCH_DISTANCE_ON  = 0.30;  // 指尖距离阈值
-    const PINCH_DISTANCE_OFF = 0.38;  
-    const JOINT_DISTANCE_MAX = 0.65;  // 关节距离阈值（关节也要相对接近）
+    const PINCH_DISTANCE_ON  = 0.35;  // 放宽到0.35，更容易触发
+    const PINCH_DISTANCE_OFF = 0.42;  // 相应放宽松开阈值
+    const JOINT_DISTANCE_MAX = 0.75;  // 放宽关节距离要求
     const PINCH_Z_DIFF_MAX = 0.15;    // Z轴差异阈值
 
     // ✅ 方法2：时序平滑 - 需要连续多帧确认
-    const PINCH_ON_FRAMES  = 2;   // 恢复为2帧
-    const PINCH_OFF_FRAMES = 3;   // 恢复为3帧
+    const PINCH_ON_FRAMES  = 1;   // 改为1帧立即触发！
+    const PINCH_OFF_FRAMES = 2;   // 松开只需2帧
     let pinchOnCount = 0;
     let pinchOffCount = 0;
 
     // ✅ 方法3：历史状态平滑
-    const PINCH_HISTORY_SIZE = 5;
+    const PINCH_HISTORY_SIZE = 3;  // 从5减到3，响应更快
     let pinchDistanceHistory = [];
     
     function addToPinchHistory(distance){
@@ -562,11 +808,11 @@ OFF计数: ${pinchOffCount}
         return;
       }
 
-      // ✅ OK手势捏合判断
+      // ✅ OK手势捏合判断（先简化，只看指尖距离）
       const isPinchConditionMet = (
-        smoothedRatio < PINCH_DISTANCE_ON &&     // 指尖靠近
-        jointRatio < JOINT_DISTANCE_MAX          // 关节也相对接近（防止只是指尖碰巧接触）
-        // Z轴检查先暂时关闭，确保能触发
+        smoothedRatio < PINCH_DISTANCE_ON        // 只看指尖距离
+        // 关节距离先暂时关闭，确保能快速触发
+        // && jointRatio < JOINT_DISTANCE_MAX  
       );
 
       const isReleaseConditionMet = (
