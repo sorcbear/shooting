@@ -104,7 +104,7 @@
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M16 8l-4-4-4 4h3v6h2V8h3z'/%3E%3Cpath fill='white' d='M5 14h2v5h10v-5h2v7H5v-7z'/%3E%3C/svg%3E");
     }
 
-    /* 每10发称号全屏展示（3秒，黑底白字） */
+    /* 每10发称号全屏展示（黑底白字） */
     #celebration{
       position:absolute; inset:0; z-index:10;
       background:#000; color:#fff;
@@ -183,7 +183,7 @@
       height:auto;
       max-height:100%;
       object-fit:contain;
-      background:#000; /* 图片本身黑底（你生成图） */
+      background:#000;
       border:1px solid rgba(0,0,0,0.12);
     }
     #sharePreview .sp-actions{
@@ -219,6 +219,28 @@
         max-height:none;
       }
     }
+
+    /* ✅ 进入页面先点“开始射击” */
+    #startGate{
+      position:absolute; inset:0; z-index:50;
+      display:flex; align-items:center; justify-content:center;
+      background:rgba(255,255,255,0.92);
+      padding:24px;
+      box-sizing:border-box;
+    }
+    #startBtn{
+      appearance:none;
+      border-radius:0;
+      padding:14px 18px;
+      font:900 18px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      background:#fff;            /* 白底 */
+      border:2px solid #000;      /* 黑框 */
+      color:#000;                 /* 黑字（可读） */
+      /* 如果你坚持“白字”，把上面 color 改成 #fff，同时 background 改成 #000 */
+      cursor:pointer;
+      box-shadow:0 8px 22px rgba(0,0,0,0.22);
+    }
+    #startBtn:active{ transform:translateY(1px); }
   </style>
 </head>
 
@@ -255,6 +277,11 @@
           </div>
         </div>
       </div>
+
+      <!-- ✅ Start Gate -->
+      <div id="startGate">
+        <button id="startBtn">开始射击</button>
+      </div>
     </div>
 
     <div id="rightPane">
@@ -286,6 +313,10 @@
     const celebration = document.getElementById('celebration');
     const celeTitle = document.getElementById('celeTitle');
     const celeSub = document.getElementById('celeSub');
+
+    // Start gate
+    const startGate = document.getElementById('startGate');
+    const startBtn = document.getElementById('startBtn');
 
     // Share preview DOM
     const sharePreview = document.getElementById('sharePreview');
@@ -532,11 +563,9 @@
       }else if(!haveLeft || !haveRight || !haveSight){
         msg = '移动双手位置\n直到露出瞄准器';
       }else if(!firstShotDone){
-        // 校准阶段：仍然要锁靶心
         if(!lockReady) msg = '请对准靶心\n保持一下';
         else msg = '已锁定 ✅\n捏合打一发校准发（不计分）';
       }else{
-        // PLAY 阶段不显示任何提示（只要有准星）
         msg = '';
       }
       if(!msg) return;
@@ -587,22 +616,109 @@
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
 
-      // ✅ 只要需要才画提示
       drawGuideOverlay(haveLeft, haveRight, haveSight);
     }
 
-    function beep(){
+    // ========================
+    // ✅ iOS 音频解锁 + 气步枪击发音效
+    // ========================
+    let _shotAC = null;
+    let _audioUnlocked = false;
+
+    function ensureAudioUnlocked(){
+      const AC = (window.AudioContext || window.webkitAudioContext);
+      if(!_shotAC) _shotAC = new AC();
+      const ac = _shotAC;
+
+      const tryUnlock = async () => {
+        try{
+          if(ac.state === 'suspended') await ac.resume();
+
+          // 播放一个 1 sample 的静音 buffer，iOS 会认为音频已被用户手势解锁
+          const buf = ac.createBuffer(1, 1, ac.sampleRate);
+          const src = ac.createBufferSource();
+          src.buffer = buf;
+          src.connect(ac.destination);
+          src.start(0);
+
+          _audioUnlocked = true;
+        }catch{}
+      };
+      tryUnlock();
+    }
+
+    function rifleShotSound(){
       try{
-        const ac = new (window.AudioContext||window.webkitAudioContext)();
-        const o = ac.createOscillator();
-        const g = ac.createGain();
-        o.type='square';
-        o.frequency.value=880;
-        g.gain.value=0.06;
-        o.connect(g); g.connect(ac.destination);
-        o.start();
-        setTimeout(()=>{o.stop();ac.close()},70);
-      }catch{}
+        const AC = (window.AudioContext || window.webkitAudioContext);
+        if(!_shotAC) _shotAC = new AC();
+        const ac = _shotAC;
+
+        if(ac.state === 'suspended'){
+          ac.resume().catch(()=>{});
+          if(!_audioUnlocked) return;
+        }
+        if(!_audioUnlocked) return;
+
+        const t0 = ac.currentTime;
+
+        const master = ac.createGain();
+        master.gain.setValueAtTime(0.0001, t0);
+        master.gain.exponentialRampToValueAtTime(0.28, t0 + 0.004);
+        master.gain.exponentialRampToValueAtTime(0.03,  t0 + 0.040);
+        master.gain.exponentialRampToValueAtTime(0.0001,t0 + 0.120);
+        master.connect(ac.destination);
+
+        // Noise burst
+        const noiseDur = 0.14;
+        const noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * noiseDur), ac.sampleRate);
+        const ch = noiseBuf.getChannelData(0);
+        for(let i=0;i<ch.length;i++){
+          const env = 1 - (i / ch.length);
+          ch[i] = (Math.random()*2 - 1) * env;
+        }
+        const noise = ac.createBufferSource();
+        noise.buffer = noiseBuf;
+
+        const noiseBP = ac.createBiquadFilter();
+        noiseBP.type = 'bandpass';
+        noiseBP.frequency.setValueAtTime(1800, t0);
+        noiseBP.Q.setValueAtTime(0.9, t0);
+
+        const noiseHP = ac.createBiquadFilter();
+        noiseHP.type = 'highpass';
+        noiseHP.frequency.setValueAtTime(500, t0);
+
+        const noiseGain = ac.createGain();
+        noiseGain.gain.setValueAtTime(0.9, t0);
+        noiseGain.gain.exponentialRampToValueAtTime(0.08, t0 + 0.06);
+        noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+
+        noise.connect(noiseBP);
+        noiseBP.connect(noiseHP);
+        noiseHP.connect(noiseGain);
+        noiseGain.connect(master);
+
+        // Low thump
+        const thump = ac.createOscillator();
+        thump.type = 'sine';
+        thump.frequency.setValueAtTime(160, t0);
+        thump.frequency.exponentialRampToValueAtTime(75, t0 + 0.05);
+
+        const thumpGain = ac.createGain();
+        thumpGain.gain.setValueAtTime(0.0001, t0);
+        thumpGain.gain.exponentialRampToValueAtTime(0.20, t0 + 0.003);
+        thumpGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+
+        thump.connect(thumpGain);
+        thumpGain.connect(master);
+
+        noise.start(t0);
+        noise.stop(t0 + noiseDur);
+
+        thump.start(t0);
+        thump.stop(t0 + 0.09);
+
+      }catch(e){}
     }
 
     // Share preview open/close
@@ -766,7 +882,9 @@
 
       flashEl.style.opacity='1';
       setTimeout(()=>flashEl.style.opacity='0',80);
-      beep();
+
+      // ✅ 每枪音效（气步枪击发感）
+      rifleShotSound();
 
       if(isCalibrationShot){
         firstShotDone = true;
@@ -904,15 +1022,13 @@ triggerLocked: ${triggerLocked}
         lockReady = false;
 
         if(firstShotDone){
-          // ✅ 校准后：只在“看不见准星”时提示，不强制回退到校准
           mode = MODE.PLAY;
-          statusEl.textContent = 'READY ✅';    
+          statusEl.textContent = 'READY ✅';
         }else{
           mode = MODE.WAIT_BOTH;
           statusEl.textContent = '等待双手...';
         }
 
-        // 校准前允许显示视频；校准后视频保持隐藏（你原逻辑）
         if(!firstShotDone){
           video.style.opacity = '1';
           video.style.pointerEvents = 'auto';
@@ -923,7 +1039,7 @@ triggerLocked: ${triggerLocked}
       // 有双手+准星
       if(firstShotDone){
         mode = MODE.PLAY;
-        lockReady = true; // 不再限制
+        lockReady = true;
         statusEl.textContent = 'READY ✅';
         hintEl.textContent = '左手"完全捏合"=开枪';
         return;
@@ -986,7 +1102,6 @@ triggerLocked: ${triggerLocked}
         const haveLeft = (lIdx!==-1 && lm[lIdx]);
         const haveRight = (rIdx!==-1 && lm[rIdx]);
 
-        // 没双手：清空准星，显示提示
         if(!haveLeft || !haveRight){
           aimX = aimY = null;
           isPinched = false;
@@ -999,7 +1114,6 @@ triggerLocked: ${triggerLocked}
           return;
         }
 
-        // 处理帧（会更新 aimX/aimY）
         processFrame(lm[lIdx], lm[rIdx]);
 
         const haveSight = (aimX!=null && aimY!=null);
@@ -1031,12 +1145,29 @@ triggerLocked: ${triggerLocked}
       await ensureVideoPlays();
     }
 
-    start().catch(e=>{
-      console.error(e);
-      statusEl.textContent='启动失败: 请检查摄像头权限或HTTPS连接';
-      // 失败也画靶子
-      render(false,false,false);
-    });
+    // ✅ 进入页面不自动 start，等用户点“开始射击”
+    function startFromGate(){
+      // 解锁音频（必须用户手势触发）
+      ensureAudioUnlocked();
+
+      // 隐藏 Gate
+      startGate.style.display = 'none';
+
+      // 启动
+      start().catch(e=>{
+        console.error(e);
+        statusEl.textContent='启动失败: 请检查摄像头权限或HTTPS连接';
+        render(false,false,false);
+        // 失败时把 gate 放回来，方便重试
+        startGate.style.display = 'flex';
+      });
+    }
+
+    // 初始先画靶子，避免空白
+    render(false,false,false);
+    statusEl.textContent = '点击“开始射击”';
+
+    startBtn.addEventListener('click', startFromGate);
   </script>
 </body>
 </html>
