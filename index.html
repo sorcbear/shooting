@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <meta name="format-detection" content="telephone=no,address=no,email=no">
-  <title>Air Finger Rifle - ISSF Edition (光感枪 - 优化版)</title>
+  <title>Air Finger Rifle</title>
 
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
@@ -52,6 +52,8 @@
     #hud b{font-size:15px}
     #hud .muted{color:#666}
     #hud .pill{border:1px solid #111;border-radius:999px;padding:6px 10px;background:#fff;font-weight:800}
+    #hint{ display:none; }
+
     #log{
       flex:1 1 auto; min-height:0;
       font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -257,7 +259,7 @@
 
     <div id="rightPane">
       <div id="hud">
-        <div><b>Finger Rifle (优化版)</b> <span class="muted">右手食指瞄准 · 左手【完全捏合】开火</span></div>
+        <div><b>Finger Rifle</b> <span class="muted">左手手掌瞄准 · 右手捏合击发</span></div>
         <span id="status" class="pill">初始化…</span>
         <span class="muted" id="hint"></span>
       </div>
@@ -322,7 +324,7 @@
 
     function tuneAimByDevice(){
       const phone = isIPhoneLike();
-      followAlpha = phone ? 1 : 0.965;
+      followAlpha = phone ? 0.9 : 0.965;
 
       const REF_SHORT = 390;
       const baseGainPhone = 6;
@@ -904,12 +906,10 @@ triggerLocked: ${triggerLocked}
         if(firstShotDone){
           // ✅ 校准后：只在“看不见准星”时提示，不强制回退到校准
           mode = MODE.PLAY;
-          statusEl.textContent = 'READY ✅';
-          hintEl.textContent = '看不见准星时再调整双手';
+          statusEl.textContent = 'READY ✅';    
         }else{
           mode = MODE.WAIT_BOTH;
           statusEl.textContent = '等待双手...';
-          hintEl.textContent = '右手食指瞄准，左手完全捏合开火';
         }
 
         // 校准前允许显示视频；校准后视频保持隐藏（你原逻辑）
