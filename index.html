@@ -332,7 +332,7 @@
       const base = phone ? baseGainPhone : baseGainPad;
 
       let gain = base * (REF_SHORT / Math.max(1, shortCss));
-      sensitivity = Math.min(4.2, Math.max(1.1, gain));
+      sensitivity = Math.min(16, Math.max(1.1, gain));
     }
 
     function resize(){
