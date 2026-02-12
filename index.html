@@ -725,15 +725,15 @@
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    const PINCH_DISTANCE_ON  = 0.35;
-    const PINCH_DISTANCE_OFF = 0.42;
+    const PINCH_DISTANCE_ON  = 0.3;
+    const PINCH_DISTANCE_OFF = 0.34;
 
-    const PINCH_ON_FRAMES  = 1;
+    const PINCH_ON_FRAMES  = 2;
     const PINCH_OFF_FRAMES = 2;
     let pinchOnCount = 0;
     let pinchOffCount = 0;
 
-    const PINCH_HISTORY_SIZE = 3;
+    const PINCH_HISTORY_SIZE = 2;
     let pinchDistanceHistory = [];
 
     function addToPinchHistory(distance){
