@@ -79,7 +79,7 @@
       position:absolute; top:16px; right:16px; z-index:6;
       background:#000; color:#fff;
       border:1px solid rgba(255,255,255,0.18);
-      border-radius:0; /* 直角 */
+      border-radius:0;
       padding:10px 14px;
       font-size:15px; font-weight:700;
       cursor:pointer;
@@ -100,14 +100,13 @@
       display:inline-block;
       background-repeat:no-repeat;
       background-size:contain;
-      /* 分享箭头（白色） */
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M16 8l-4-4-4 4h3v6h2V8h3z'/%3E%3Cpath fill='white' d='M5 14h2v5h10v-5h2v7H5v-7z'/%3E%3C/svg%3E");
     }
 
     /* ✅ 每10发称号全屏展示（3秒） */
     #celebration{
       position:absolute; inset:0; z-index:10;
-      background:#000; /* ✅ 纯黑 */
+      background:#000;
       color:#fff;
       display:none;
       align-items:center; justify-content:center;
@@ -130,6 +129,100 @@
       font:700 22px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       opacity:0.88;
     }
+
+    /* ✅ 分享预览层（先预览，再下载/返回） */
+    #sharePreview{
+      position:absolute; inset:0; z-index:20;
+      display:none;
+    }
+    #sharePreview.show{ display:block; }
+
+    #sharePreview .sp-backdrop{
+      position:absolute; inset:0;
+      background:rgba(0,0,0,0.75);
+    }
+
+    #sharePreview .sp-panel{
+      position:absolute;
+      left:50%; top:50%;
+      transform:translate(-50%,-50%);
+      width:min(92vw, 820px);
+      max-height:92vh;
+      background:#000;
+      border:1px solid rgba(255,255,255,0.18);
+      box-shadow:0 10px 30px rgba(0,0,0,0.45);
+      display:flex;
+      flex-direction:column;
+    }
+
+    #sharePreview .sp-top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:12px 14px;
+      border-bottom:1px solid rgba(255,255,255,0.14);
+    }
+
+    #sharePreview .sp-title{
+      color:#fff;
+      font:800 16px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    }
+
+    #sharePreview .sp-close{
+      appearance:none;
+      background:transparent;
+      border:1px solid rgba(255,255,255,0.18);
+      color:#fff;
+      width:34px; height:34px;
+      border-radius:0;
+      font:900 20px/1 system-ui;
+      cursor:pointer;
+    }
+
+    #sharePreview .sp-body{
+      padding:14px;
+      overflow:auto;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:#000;
+    }
+
+    #sharePreview .sp-body img{
+      width:100%;
+      height:auto;
+      max-height:70vh;
+      object-fit:contain;
+      background:#111;
+      border:1px solid rgba(255,255,255,0.14);
+    }
+
+    #sharePreview .sp-actions{
+      display:flex;
+      gap:10px;
+      padding:12px 14px;
+      border-top:1px solid rgba(255,255,255,0.14);
+      justify-content:flex-end;
+    }
+
+    #sharePreview .sp-btn{
+      border-radius:0;
+      padding:10px 14px;
+      font:800 14px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      cursor:pointer;
+      border:1px solid rgba(255,255,255,0.18);
+      background:#000;
+      color:#fff;
+    }
+
+    #sharePreview .sp-btn:hover{ background:#111; }
+
+    #sharePreview .sp-primary{
+      background:#fff;
+      color:#000;
+      border-color:#fff;
+    }
+    #sharePreview .sp-primary:hover{ background:#f2f2f2; }
   </style>
 </head>
 
@@ -148,6 +241,26 @@
         <div>
           <div class="title" id="celeTitle">奥运冠军</div>
           <div class="subtitle" id="celeSub">10发总分 105.0</div>
+        </div>
+      </div>
+
+      <!-- ✅ 分享预览层：先预览，再下载/返回 -->
+      <div id="sharePreview" aria-hidden="true">
+        <div class="sp-backdrop"></div>
+        <div class="sp-panel" role="dialog" aria-modal="true">
+          <div class="sp-top">
+            <div class="sp-title">分享图片预览</div>
+            <button class="sp-close" id="spClose" aria-label="关闭预览">×</button>
+          </div>
+
+          <div class="sp-body">
+            <img id="spImg" alt="成绩分享图预览" />
+          </div>
+
+          <div class="sp-actions">
+            <button class="sp-btn" id="spBack">返回</button>
+            <button class="sp-btn sp-primary" id="spDownload">下载</button>
+          </div>
         </div>
       </div>
     </div>
@@ -181,6 +294,16 @@
     const celebration = document.getElementById('celebration');
     const celeTitle = document.getElementById('celeTitle');
     const celeSub = document.getElementById('celeSub');
+
+    // ✅ 分享预览层 DOM
+    const sharePreview = document.getElementById('sharePreview');
+    const spImg = document.getElementById('spImg');
+    const spClose = document.getElementById('spClose');
+    const spBack = document.getElementById('spBack');
+    const spDownload = document.getElementById('spDownload');
+
+    let spBlobUrl = null;
+    let spDownloadName = '';
 
     // 调试模式开关（改为true可显示实时捏合数据）
     const DEBUG_MODE = false;
@@ -306,7 +429,7 @@
 
     // Scores
     let shotScores = [];
-    let lastTenShownEnd = 0; // 避免重复触发同一组10发
+    let lastTenShownEnd = 0;
 
     function showTenTitle(sum){
       celeTitle.textContent = titleByTenSum(sum);
@@ -406,7 +529,6 @@
 
     function drawGuideOverlay(haveLeft, haveRight){
       const half = targetSquareHalf * DPR;
-      const boxX = cx - half;
       const boxY = cy - half;
       const boxW = 2*half;
       const boxH = 2*half;
@@ -489,7 +611,44 @@
       }catch{}
     }
 
-    // ✅ 分享成绩功能（图1紫色背景 -> 纯黑；并写入“称号”）
+    // ✅ 分享预览层：打开/关闭
+    function openSharePreview(blob){
+      if(spBlobUrl){
+        URL.revokeObjectURL(spBlobUrl);
+        spBlobUrl = null;
+      }
+      spBlobUrl = URL.createObjectURL(blob);
+      spDownloadName = `finger-rifle-${Date.now()}.png`;
+
+      spImg.src = spBlobUrl;
+      sharePreview.classList.add('show');
+      sharePreview.setAttribute('aria-hidden','false');
+    }
+
+    function closeSharePreview(){
+      sharePreview.classList.remove('show');
+      sharePreview.setAttribute('aria-hidden','true');
+
+      if(spBlobUrl){
+        URL.revokeObjectURL(spBlobUrl);
+        spBlobUrl = null;
+      }
+      spImg.src = '';
+    }
+
+    spClose.addEventListener('click', closeSharePreview);
+    spBack.addEventListener('click', closeSharePreview);
+    sharePreview.querySelector('.sp-backdrop').addEventListener('click', closeSharePreview);
+
+    spDownload.addEventListener('click', ()=>{
+      if(!spBlobUrl) return;
+      const a = document.createElement('a');
+      a.href = spBlobUrl;
+      a.download = spDownloadName || `finger-rifle-${Date.now()}.png`;
+      a.click();
+    });
+
+    // ✅ 分享成绩：生成图后先预览，不自动下载
     async function shareScore(){
       try{
         const shareCanvas = document.createElement('canvas');
@@ -566,24 +725,13 @@
         const now = new Date();
         shareCtx.fillText(now.toLocaleDateString('zh-CN'), width/2, height-40);
 
-        shareCanvas.toBlob(async(blob)=>{
-          const file = new File([blob], 'finger-rifle-score.png', {type: 'image/png'});
-
-          if(navigator.share && navigator.canShare && navigator.canShare({files: [file]})){
-            try{
-              const n = shotScores.length;
-              const avg = n ? (shotScores.reduce((a,b)=>a+b,0)/n) : 0;
-              await navigator.share({
-                files: [file],
-                title: 'Air Finger Rifle 成绩',
-                text: `我的射击成绩：${n}发，平均${avg.toFixed(2)}分！`
-              });
-            }catch(e){
-              downloadImage(blob);
-            }
-          }else{
-            downloadImage(blob);
+        // 生成图片 -> 打开预览（不自动下载）
+        shareCanvas.toBlob((blob)=>{
+          if(!blob){
+            alert('生成图片失败');
+            return;
           }
+          openSharePreview(blob);
         }, 'image/png');
 
       }catch(e){
@@ -592,15 +740,7 @@
       }
     }
 
-    function downloadImage(blob){
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `finger-rifle-${Date.now()}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-
+    // 绑定分享按钮
     shareBtn.addEventListener('click', shareScore);
 
     // ========================================
