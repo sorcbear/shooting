@@ -11,7 +11,7 @@
     #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
     #leftPane{
       position:relative; flex:0 0 66.6667%; min-height:0;
-      background:#000; overflow:hidden;
+      background:#fff; overflow:hidden;               /* ✅ 射击背景纯白 */
     }
     #rightPane{
       position:relative; flex:0 0 33.3333%; min-height:0;
@@ -28,14 +28,14 @@
       }
     }
 
-    /* ✅ 解决思路(2)：iOS 合成层更稳定（video+canvas叠层） */
+    /* ✅ iOS 合成层稳定 */
     #video{
       position:absolute; inset:0; width:100%; height:100%;
       object-fit:cover; transform:scaleX(-1) translateZ(0);
       will-change: transform;
       backface-visibility: hidden;
       z-index:0;
-      background:#000; opacity:1; transition:opacity 120ms linear;
+      background:#000; opacity:1; transition:opacity 120ms linear; /* 摄像头阶段可黑底 */
     }
     #cv{
       position:absolute; inset:0; width:100%; height:100%;
@@ -107,18 +107,17 @@
     function isIPhoneLike(){
       const ua = navigator.userAgent || '';
       const isiPhone = /iPhone/.test(ua);
-      const isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua)); // iPadOS
+      const isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua));
       if(isiPhone) return true;
       if(isiPad) return false;
       return shortCss < 520;
     }
 
-    // Aim（准星）
+    // Aim
     let aimX=null, aimY=null;
     let followAlpha = 0.97;
     let sensitivity = 2.4;
 
-    // ✅ 分开调 iPhone / iPad 抖动
     function tuneAimByDevice(){
       const phone = isIPhoneLike();
       followAlpha = phone ? 0.995 : 0.965;
@@ -132,7 +131,6 @@
       sensitivity = Math.min(4.2, Math.max(1.1, gain));
     }
 
-    // ✅ 解决思路(2)：iOS 方向切换/地址栏变化时，做“二次 resize”
     function resize(){
       DPR = Math.max(1, window.devicePixelRatio || 1);
 
@@ -163,25 +161,20 @@
     addEventListener('orientationchange', ()=>setTimeout(resizeTwice, 150));
     resizeTwice();
 
-    // Camera
-    let facingMode = 'user';
-
-    // ✅ 解决思路(1)：视频是否真正开始渲染（避免“局部黑/冻结/没刷”错觉）
+    // Video readiness
     let videoReady = false;
     function updateVideoReady(){
-      // videoWidth>0 + readyState足够，基本等价“有纹理在更新”
       videoReady = (video.readyState >= 2) && (video.videoWidth > 0) && (video.videoHeight > 0);
       return videoReady;
     }
 
-    // States（简化：第一发为校准发，不计分）
+    // States
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', PLAY:'PLAY' };
     let mode = MODE.WAIT_BOTH;
-
     let firstShotDone = false;
     let lockReady = false;
 
-    // 靶心/瞄具
+    // Target / sight
     const targetSquareHalf = 110;
     const targetDotR = 22;
     const sight_outer_r = 120;
@@ -197,7 +190,7 @@
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
 
-    // 计分
+    // Score
     const CENTER_SCORE = 10.9;
     const TOUCH_SCORE  = 6.0;
 
@@ -213,7 +206,7 @@
       return Math.round(score * 10) / 10;
     }
 
-    // Scores（倒序：最新在最上）
+    // Scores (latest on top)
     let shotScores = [];
     function renderScores(){
       let out = '';
@@ -230,29 +223,32 @@
 
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
-      if(facingMode==='user') x = 1 - x;
-
+      x = 1 - x; // facingMode 固定 user（你当前版本不需要切换按钮）
       let px = x * W;
       let py = y * H;
-
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
-
       return {px,py};
     }
 
     // Draw
     function drawTarget(){
-      ctx.clearRect(0,0,W,H);
+      // ✅ 整屏白底（保证射击阶段背景纯白）
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0,0,W,H);
+
       const half = targetSquareHalf * DPR;
 
+      // 白方框（靶纸）
       ctx.fillStyle = '#fff';
       ctx.fillRect(cx-half, cy-half, 2*half, 2*half);
 
+      // 方框边
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 4 * DPR;
       ctx.strokeRect(cx-half, cy-half, 2*half, 2*half);
 
+      // 黑圆心（必须一直纯黑可见）
       ctx.fillStyle = '#000';
       ctx.beginPath();
       ctx.arc(cx, cy, targetDotR * DPR, 0, Math.PI*2);
@@ -279,46 +275,69 @@
       ctx.stroke();
     }
 
-    // ✅ 文案统一变大加粗（你要求的）
+    // ✅ 提示文字：更大、更粗；放在白方框里，但绝不挡住黑圆心
     function drawGuideOverlay(haveLeft, haveRight){
-      ctx.save();
+      const half = targetSquareHalf * DPR;
+      const boxX = cx - half;
+      const boxY = cy - half;
+      const boxW = 2*half;
+      const boxH = 2*half;
 
-      // 大字：iPhone/iPad都明显（按短边自适应）
-      const big = Math.max(18, Math.round((shortCss * 0.06))); // 例如 390 -> 23, 768 -> 46
-      const fontPx = Math.min(46, big) * DPR;
-
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = `900 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      // 字体更大：以方框大小为基准（并封顶）
+      const fontPx = Math.min(60*DPR, Math.max(28*DPR, Math.round(boxH * 0.22)));
+      const lineH  = fontPx * 1.08;
 
       let msg = '';
       if(!videoReady){
         msg = '等待摄像头画面…';
-      }else if(!haveLeft || !haveRight){
-        msg = '移动双手位置\n直到露出瞄准器';
-      }else if(!lockReady){
+      }else if(!haveLeft || !haveRight || !lockReady){
         msg = '移动双手位置\n直到露出瞄准器';
       }else if(!firstShotDone){
-        msg = '已锁定 ✅\n捏合打一发“校准发”（不计分）';
+        msg = '已锁定 ✅\n捏合打一发校准发（不计分）';
       }else{
         msg = 'READY ✅\n完全捏合开火';
       }
 
       const lines = msg.split('\n');
-      const lineH = fontPx * 1.15;
 
-      const maxW = Math.max(...lines.map(t=>ctx.measureText(t).width));
-      const padX = 26*DPR;
-      const padY = 20*DPR;
-      const boxW = maxW + padX*2;
-      const boxH = lines.length*lineH + padY*2;
+      // 放在白方框的“上方区域”，留出中间黑圆心区域
+      // 黑圆心安全区：centerY ± safeR
+      const safeR = (targetDotR*DPR) + (18*DPR); // 黑圆心周围留空
+      const topAreaY1 = boxY + 10*DPR;
+      const topAreaY2 = (cy - safeR) - 10*DPR;
 
-      ctx.fillStyle = 'rgba(255,255,255,0.62)';
-      ctx.fillRect(cx-boxW/2, cy-boxH/2, boxW, boxH);
+      // 计算文本块高度，如果放不下就缩小一点
+      let blockH = lines.length * lineH;
+      let maxAllowedH = Math.max(10*DPR, topAreaY2 - topAreaY1);
+      let scale = Math.min(1, maxAllowedH / blockH);
+      const fp = fontPx * scale;
+      const lh = lineH * scale;
 
+      ctx.save();
+      ctx.font = `900 ${fp}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // 计算宽度（限制在白方框内）
+      let maxTextW = 0;
+      for(const t of lines) maxTextW = Math.max(maxTextW, ctx.measureText(t).width);
+      const padX = 10*DPR;
+      const padY = 8*DPR;
+      const bw = Math.min(boxW - 16*DPR, maxTextW + padX*2);
+      const bh = lines.length*lh + padY*2;
+
+      const bx = cx - bw/2;
+      const by = topAreaY1 + (maxAllowedH - bh)/2; // 居中到“上方区域”
+
+      // 半透明白底框（仍在白方框里，视觉更清晰）
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillRect(bx, by, bw, bh);
+
+      // 文字
       ctx.fillStyle = '#000';
       for(let i=0;i<lines.length;i++){
-        ctx.fillText(lines[i], cx, cy - (lines.length-1)*lineH/2 + i*lineH);
+        const yy = by + padY + lh/2 + i*lh;
+        ctx.fillText(lines[i], cx, yy);
       }
 
       ctx.restore();
@@ -349,19 +368,16 @@
       }catch{}
     }
 
-    // 扳机（严格）
+    // Trigger (strict pinch)
     let isPinched = false;
     let triggerLocked = false;
-
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    const PINCH_ON  = 0.28; // 完全捏合
+    const PINCH_ON  = 0.28;
     const PINCH_OFF = 0.36;
-
     const PINCH_ON_FRAMES  = 2;
     const PINCH_OFF_FRAMES = 3;
-
     let pinchOnCount = 0;
     let pinchOffCount = 0;
 
@@ -371,7 +387,6 @@
       if(aimX==null) return;
 
       lastShotTs = now;
-
       freezeAimX = aimX; freezeAimY = aimY;
       freezeUntil = now + FREEZE_MS;
 
@@ -382,8 +397,11 @@
       if(isCalibrationShot){
         firstShotDone = true;
         mode = MODE.PLAY;
+
+        // ✅ 射击阶段：隐藏视频，但底层已是白（canvas整屏白底 + leftPane白底）
         video.style.opacity = '0';
         video.style.pointerEvents = 'none';
+
         statusEl.textContent = '校准完成 ✅ 正式开始';
         hintEl.textContent = '左手“完全捏合”=开枪';
         return;
@@ -408,11 +426,9 @@
     function processFrame(leftLm, rightLm){
       const now = Date.now();
       if(now < freezeUntil) return;
-
-      // ✅ 视频没ready时，不做任何锁定/触发（解决思路1）
       if(!videoReady) return;
 
-      // 右手：准星
+      // right hand aim
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
@@ -422,7 +438,7 @@
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
-      // 左手：捏合
+      // left hand pinch
       const lThumb = leftLm[4];
       const lIndex = leftLm[8];
       const wrist  = leftLm[0];
@@ -478,7 +494,6 @@
     }
 
     function updateLockState(haveLeft, haveRight){
-      // ✅ 视频没ready时：直接提示等待，不进入锁定流程（解决思路1）
       if(!videoReady){
         lockFrames = 0;
         lockReady = false;
@@ -497,6 +512,7 @@
 
         statusEl.textContent = '等待双手...';
         hintEl.textContent = '右手食指瞄准，左手完全捏合开火';
+
         video.style.opacity = '1';
         video.style.pointerEvents = 'auto';
         return;
@@ -535,7 +551,6 @@
     let hands=null, camera=null;
 
     async function ensureVideoPlays(){
-      // ✅ 解决思路(1)：强制尝试播放（iOS 有时需要）
       try{
         video.muted = true;
         video.setAttribute('playsinline', '');
@@ -584,7 +599,6 @@
         render(true,true);
       });
 
-      // 监听 video 事件：确保 ready 状态更新
       video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
       video.addEventListener('playing', ()=>{ updateVideoReady(); }, {once:false});
 
@@ -595,15 +609,14 @@
       lockFrames = 0;
       mode = MODE.WAIT_BOTH;
 
-      video.style.transform = (facingMode==='user')?'scaleX(-1) translateZ(0)':'translateZ(0)';
+      video.style.transform = 'scaleX(-1) translateZ(0)';
 
       camera = new Camera(video, {
         onFrame: async()=>{
-          // 关键：有些 iOS 状态下 video 不自动 play，这里持续尝试一次
           if(!videoReady) await ensureVideoPlays();
           await hands.send({image:video});
         },
-        width:640, height:480, facingMode
+        width:640, height:480, facingMode:'user'
       });
 
       await camera.start();
