@@ -75,7 +75,7 @@
       display:none;
     }
 
-    /* 分享按钮 */
+    /* 分享按钮（右上角 / 直角 / 黑底白字 / 白色分享箭头） */
     #shareBtn{
       position:absolute; top:16px; right:16px; z-index:6;
       background:#000; color:#fff;
@@ -104,7 +104,7 @@
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M16 8l-4-4-4 4h3v6h2V8h3z'/%3E%3Cpath fill='white' d='M5 14h2v5h10v-5h2v7H5v-7z'/%3E%3C/svg%3E");
     }
 
-    /* 每10发称号 */
+    /* 每10发称号全屏展示（黑底白字） */
     #celebration{
       position:absolute; inset:0; z-index:10;
       background:#000; color:#fff;
@@ -130,10 +130,11 @@
       opacity:0.88;
     }
 
-    /* 分享预览 */
+    /* 分享预览层（白底黑字，横屏不裁按钮） */
     #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
     #sharePreview.show{ display:block; }
     #sharePreview .sp-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.55); }
+
     #sharePreview .sp-panel{
       position:absolute; left:50%; top:50%;
       transform:translate(-50%,-50%);
@@ -209,6 +210,7 @@
       background:#000; color:#fff; border-color:#000;
     }
     #sharePreview .sp-primary:hover{ background:#111; }
+
     @media (orientation: landscape), (max-height: 520px){
       #sharePreview .sp-panel{
         left:12px; right:12px; top:12px; bottom:12px;
@@ -218,19 +220,20 @@
       }
     }
 
-    /* 开始页 */
+    /* ✅ 开始页：纯白背景 + 上图下按钮 */
     #startGate{
       position:absolute; inset:0; z-index:30;
       display:flex;
       flex-direction:column;
       align-items:center;
       justify-content:space-between;
-      background:#fff;
+      background:#fff; /* ✅ 纯白 */
       padding:18px;
       padding-top:calc(6px + env(safe-area-inset-top));
       padding-bottom:calc(20px + env(safe-area-inset-bottom));
       box-sizing:border-box;
     }
+
     #gateImgWrap{
       width:min(920px, 96vw);
       flex:1 1 auto;
@@ -246,6 +249,7 @@
       max-height:100%;
       object-fit:contain;
     }
+
     #gateBtn{
       width:240px;
       height:60px;
@@ -268,8 +272,17 @@
       touch-action:manipulation;
       flex:0 0 auto;
     }
-    #gateBtn .line1{font-weight:900;font-size:20px;line-height:1;}
-    #gateBtn .line2{font-weight:800;font-size:13px;line-height:1;opacity:0.85;}
+    #gateBtn .line1{
+      font-weight:900;
+      font-size:20px;
+      line-height:1;
+    }
+    #gateBtn .line2{
+      font-weight:800;
+      font-size:13px;
+      line-height:1;
+      opacity:0.85;
+    }
     #gateBtn:hover{ background:#000; color:#fff; }
     #gateBtn:disabled{ opacity:0.75; cursor:default; }
   </style>
@@ -309,8 +322,10 @@
         </div>
       </div>
 
+      <!-- ✅ 纯白背景，上面放图，下面按钮 -->
       <div id="startGate">
         <div id="gateImgWrap">
+          <!-- 把你发的图保存为 start-guide.png 放在同目录 -->
           <img id="gateImg" src="start-guide.png" alt="左手瞄准，右手击发" />
         </div>
         <button id="gateBtn">
@@ -440,6 +455,7 @@
       return videoReady;
     }
 
+    // ✅ 稳定启动：等待 video 真正 ready（不改任何射击/计分逻辑）
     function waitVideoReady(timeoutMs=9000){
       return new Promise((resolve, reject)=>{
         const t0 = Date.now();
@@ -463,14 +479,10 @@
     const sight_outer_r = 120;
     const sight_inner_r = 44;
 
-    // Trigger marker position
-    let trigX=null, trigY=null;
-
     // Freeze
     const FREEZE_MS = 220;
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
-    let freezeTrigX = null, freezeTrigY = null;
 
     // Lock for calibration phase ONLY
     const LOCK_DIST_PX = 38;
@@ -552,29 +564,17 @@
     // Utils
     const ema = (prev,next,a)=> prev + (next-prev)*a;
 
-    // 原映射（保持你之前的手感），只加一个“轻微夹紧”，避免偶尔甩出屏幕
-    function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
-
     function mapToScreen(nx, ny){
       let x = nx, y = ny;
       x = 1 - x; // mirror
       let px = x * W;
       let py = y * H;
-
-      // 你的原逻辑：灵敏度放大
       px = cx + (px - cx) * sensitivity;
       py = cy + (py - cy) * sensitivity;
-
-      // ✅ 关键：只 clamp，不再用“横向更激进的缩放”去破坏手感
-      // clamp 很轻，主要是防止偶尔出界；不会要求两手贴一起
-      const m = 6 * DPR;
-      px = clamp(px, m, W - m);
-      py = clamp(py, m, H - m);
-
       return {px,py};
     }
 
-    // ========= 画面 =========
+    // Draw
     function drawTarget(){
       ctx.fillStyle = '#fff';
       ctx.fillRect(0,0,W,H);
@@ -613,49 +613,7 @@
       ctx.stroke();
     }
 
-    // ✅ 扳机logo：按你图（圆环 + 柄），尺寸=瞄准镜外圈同级
-    function drawTriggerLogo(x,y){
-      const R = sight_outer_r * DPR;         // 外圈半径=瞄准镜同级
-      const ringW = 24 * DPR;               // 圆环粗细（接近你图效果）
-      const stemW = 26 * DPR;               // 柄宽
-      const stemH = 150 * DPR;              // 柄长
-      const stemR = 16 * DPR;               // 柄圆角
-
-      ctx.save();
-      ctx.translate(x,y);
-
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#000';
-      ctx.fillStyle = 'transparent';
-
-      // 圆环（空心粗线）
-      ctx.lineWidth = ringW;
-      ctx.beginPath();
-      ctx.arc(0, 0, R - ringW*0.6, 0, Math.PI*2);
-      ctx.stroke();
-
-      // 柄（黑色描边粗线的“胶囊”）
-      // 你图是空心轮廓，内部白色（背景透出），所以用 stroke 来画胶囊
-      const yTop = (R - ringW*0.6) + (ringW*0.15);
-      const yBot = yTop + stemH;
-      ctx.lineWidth = stemW;
-      ctx.beginPath();
-      ctx.moveTo(0, yTop + stemR);
-      ctx.lineTo(0, yBot - stemR);
-      ctx.stroke();
-
-      // 顶部与圆环连接处略加粗一点（更像你图）
-      ctx.lineWidth = stemW * 1.05;
-      ctx.beginPath();
-      ctx.moveTo(0, yTop);
-      ctx.lineTo(0, yTop + 1);
-      ctx.stroke();
-
-      ctx.restore();
-    }
-
-    function drawGuideOverlay(haveAimHand, haveTrigHand, haveSight){
+    function drawGuideOverlay(haveLeft, haveRight, haveSight){
       const half = targetSquareHalf * DPR;
       const boxY = cy - half;
       const boxW = 2*half;
@@ -667,7 +625,7 @@
       let msg = '';
       if(!videoReady){
         msg = '等待摄像头画面…';
-      }else if(!haveAimHand || !haveTrigHand || !haveSight){
+      }else if(!haveLeft || !haveRight || !haveSight){
         msg = '移动双手位置\n直到露出瞄准器';
       }else if(!firstShotDone){
         if(!lockReady) msg = '请对准靶心\n保持一下';
@@ -715,7 +673,7 @@
       ctx.restore();
     }
 
-    function render(haveAimHand, haveTrigHand, haveSight){
+    function render(haveLeft, haveRight, haveSight){
       drawTarget();
 
       const now = Date.now();
@@ -723,15 +681,11 @@
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
 
-      const tx = (now < freezeUntil && freezeTrigX!=null) ? freezeTrigX : trigX;
-      const ty = (now < freezeUntil && freezeTrigY!=null) ? freezeTrigY : trigY;
-      if(tx!=null && ty!=null) drawTriggerLogo(tx, ty);
-
-      drawGuideOverlay(haveAimHand, haveTrigHand, haveSight);
+      drawGuideOverlay(haveLeft, haveRight, haveSight);
     }
 
     // ============================================================
-    // ✅【声音系统】（原样）
+    // ✅【声音系统】更“爆炸/砰”：低频 thump + 大噪声爆裂 + 尾音
     // ============================================================
     let audioCtx = null;
     let audioEnabled = false;
@@ -740,6 +694,7 @@
     let compressor = null;
     let limiter = null;
 
+    // 轻微 slapback（让“砰”更厚一点）
     let slapDelay = null;
     let slapFB = null;
     let slapMix = null;
@@ -753,6 +708,7 @@
       audioCtx = new AC();
 
       preGain = audioCtx.createGain();
+      // ✅ 更像爆炸：整体更大一点
       preGain.gain.setValueAtTime(1.55, audioCtx.currentTime);
 
       compressor = audioCtx.createDynamicsCompressor();
@@ -769,6 +725,7 @@
       limiter.attack.setValueAtTime(0.001, audioCtx.currentTime);
       limiter.release.setValueAtTime(0.08, audioCtx.currentTime);
 
+      // slapback：极轻
       slapDelay = audioCtx.createDelay(0.10);
       slapDelay.delayTime.setValueAtTime(0.030, audioCtx.currentTime);
       slapFB = audioCtx.createGain();
@@ -796,6 +753,7 @@
       if(ctx.state === 'suspended') await ctx.resume();
       audioEnabled = true;
 
+      // iOS 输出挂载小脉冲
       try{
         const t = ctx.currentTime;
         const o = ctx.createOscillator();
@@ -816,6 +774,7 @@
       const data = buf.getChannelData(0);
       for(let i=0;i<n;i++){
         const x = i / n;
+        // ✅ 更像“爆”：前 10~20ms 更猛，然后衰减
         const e = Math.pow(1 - x, 2.15);
         const punch = (x < 0.020) ? 2.25 : 1.0;
         data[i] = (Math.random()*2-1) * e * punch;
@@ -823,11 +782,13 @@
       return buf;
     }
 
+    // ✅ 更爆炸的击发音
     function beep(){
       if(!audioEnabled || !audioCtx || !preGain) return;
       const ctx = audioCtx;
       const t0 = ctx.currentTime;
 
+      // 1) 低频 thump（更像“砰”）
       try{
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -842,8 +803,9 @@
         o.stop(t0 + 0.26);
       }catch{}
 
+      // 2) 爆裂主体：噪声 + 低通下扫（更像“轰”）
       try{
-        const dur = 0.32;
+        const dur = 0.32; // ✅ 尾音更长一点点
         const src = ctx.createBufferSource();
         src.buffer = makeNoiseBuffer(dur);
 
@@ -862,6 +824,7 @@
         src.stop(t0 + dur + 0.03);
       }catch{}
 
+      // 3) 高频 crack：带通短促一刀（让“爆”更炸）
       try{
         const dur = 0.08;
         const src = ctx.createBufferSource();
@@ -1010,9 +973,9 @@
     let lastShotTs = 0;
 
     const PINCH_DISTANCE_ON  = 0.20;
-    const PINCH_DISTANCE_OFF = 0.28;
+    const PINCH_DISTANCE_OFF = 0.26;
 
-    const PINCH_ON_FRAMES  = 3;
+    const PINCH_ON_FRAMES  = 2;
     const PINCH_OFF_FRAMES = 3;
     let pinchOnCount = 0;
     let pinchOffCount = 0;
@@ -1044,7 +1007,6 @@
 
       lastShotTs = now;
       freezeAimX = aimX; freezeAimY = aimY;
-      freezeTrigX = trigX; freezeTrigY = trigY;
       freezeUntil = now + FREEZE_MS;
 
       flashEl.style.opacity='1';
@@ -1072,71 +1034,34 @@
       hintEl.textContent = '左手"完全捏合"=开枪';
     }
 
-    // ✅ 关键：不再用 Left/Right label，改用“屏幕左右位置”分配两只手角色
-    function handMeanX(lm){
-      let s=0;
-      for(const p of lm) s += p.x;
-      return s / lm.length;
+    // MediaPipe
+    function getHandIndexByLabel(hdList, label){
+      for(let i=0;i<hdList.length;i++){
+        if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
+      }
+      return -1;
     }
 
-    function assignHandsByScreenSide(lmList){
-      // 返回 { aimLm, trigLm, haveAim, haveTrig }
-      // 规则：屏幕左侧 = 瞄准手；屏幕右侧 = 扳机手
-      // 注意：你画面是 mirror，所以“屏幕坐标x” = 1 - meanX
-      if(!lmList || lmList.length === 0){
-        return {aimLm:null, trigLm:null, haveAim:false, haveTrig:false};
-      }
-      if(lmList.length === 1){
-        const sx = 1 - handMeanX(lmList[0]);
-        if(sx < 0.5) return {aimLm:lmList[0], trigLm:null, haveAim:true, haveTrig:false};
-        return {aimLm:null, trigLm:lmList[0], haveAim:false, haveTrig:true};
-      }
-      // 2只手：按屏幕x排序
-      const a = lmList[0], b = lmList[1];
-      const ax = 1 - handMeanX(a);
-      const bx = 1 - handMeanX(b);
-      if(ax <= bx){
-        return {aimLm:a, trigLm:b, haveAim:true, haveTrig:true};
-      }else{
-        return {aimLm:b, trigLm:a, haveAim:true, haveTrig:true};
-      }
-    }
-
-    function processFrame(aimLm, trigLm){
+    function processFrame(leftLm, rightLm){
       const now = Date.now();
       if(now < freezeUntil) return;
       if(!videoReady) return;
 
-      // aim：用 index tip 控制瞄准镜（保持你之前方式，只是 hand 来源更稳）
-      if(aimLm){
-        const tip = aimLm[8];
-        const p = mapToScreen(tip.x, tip.y);
-        if(aimX==null){ aimX=p.px; aimY=p.py; }
-        else{
-          aimX = ema(aimX, p.px, followAlpha);
-          aimY = ema(aimY, p.py, followAlpha);
-        }
+      const rTip = rightLm[8];
+      const aimP = mapToScreen(rTip.x, rTip.y);
+
+      if(aimX==null){ aimX=aimP.px; aimY=aimP.py; }
+      else{
+        aimX = ema(aimX, aimP.px, followAlpha);
+        aimY = ema(aimY, aimP.py, followAlpha);
       }
 
-      // trig logo：用 thumb/index 中点显示位置
-      if(trigLm){
-        const th = trigLm[4];
-        const ix = trigLm[8];
-        const mx = (th.x + ix.x) * 0.5;
-        const my = (th.y + ix.y) * 0.5;
-        const p = mapToScreen(mx, my);
-        trigX = p.px; trigY = p.py;
-      }
+      const lThumb = leftLm[4];
+      const lIndex = leftLm[8];
+      const wrist  = leftLm[0];
+      const iMcp   = leftLm[5];
 
-      // 捏合击发逻辑：完全沿用你原来的阈值/节流/锁定逻辑
-      if(!trigLm) return;
-
-      const tThumb = trigLm[4];
-      const tIndex = trigLm[8];
-      const wrist  = trigLm[0];
-      const iMcp   = trigLm[5];
-
-      const tipDist3D = distance3D(tThumb, tIndex);
+      const tipDist3D = distance3D(lThumb, lIndex);
       const palmSize = Math.max(1e-6, distance3D(wrist, iMcp));
       const pinchRatio = tipDist3D / palmSize;
 
@@ -1149,10 +1074,11 @@ mode: ${mode}
 firstShotDone: ${firstShotDone}
 lockReady: ${lockReady}
 aim: ${aimX? 'yes':'no'}
-trig: ${trigX? 'yes':'no'}
 pinch: ${smoothedRatio.toFixed(3)}
 triggerLocked: ${triggerLocked}
 videoReady: ${videoReady}
+readyState: ${video.readyState}
+vw/vh: ${video.videoWidth}x${video.videoHeight}
         `.trim();
       }
 
@@ -1205,7 +1131,7 @@ videoReady: ${videoReady}
       }
     }
 
-    function updateLockState(haveAimHand, haveTrigHand, haveSight){
+    function updateLockState(haveLeft, haveRight, haveSight){
       if(!videoReady){
         lockFrames = 0;
         lockReady = false;
@@ -1216,7 +1142,7 @@ videoReady: ${videoReady}
         return;
       }
 
-      if(!haveAimHand || !haveTrigHand || !haveSight){
+      if(!haveLeft || !haveRight || !haveSight){
         lockFrames = 0;
         lockReady = false;
 
@@ -1263,6 +1189,7 @@ videoReady: ${videoReady}
     // Init
     let hands=null, camera=null;
 
+    // ✅ 只在点击开始后做一次 play（避免 iPad 偶发卡死在 play 的 await）
     let triedPlayOnce = false;
     async function tryPlayOnceInGesture(){
       if(triedPlayOnce) return;
@@ -1285,7 +1212,7 @@ videoReady: ${videoReady}
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
       hands.setOptions({
         maxNumHands:2,
-        modelComplexity:1,
+        modelComplexity:1, // ✅ 恢复到你原来的稳定识别（不改触发逻辑）
         minDetectionConfidence:0.7,
         minTrackingConfidence:0.7
       });
@@ -1294,25 +1221,30 @@ videoReady: ${videoReady}
         updateVideoReady();
 
         const lm = res.multiHandLandmarks||[];
-        const {aimLm, trigLm, haveAim, haveTrig} = assignHandsByScreenSide(lm);
+        const hd = res.multiHandedness||[];
+        const lIdx = getHandIndexByLabel(hd, 'Left');
+        const rIdx = getHandIndexByLabel(hd, 'Right');
 
-        // 如果某只手消失，分别清理对应状态（避免互相影响）
-        if(!haveAim){
+        const haveLeft = (lIdx!==-1 && lm[lIdx]);
+        const haveRight = (rIdx!==-1 && lm[rIdx]);
+
+        if(!haveLeft || !haveRight){
           aimX = aimY = null;
-        }
-        if(!haveTrig){
-          trigX = trigY = null;
           isPinched = false;
           triggerLocked = false;
           pinchOnCount = pinchOffCount = 0;
           pinchDistanceHistory = [];
+
+          updateLockState(!!haveLeft, !!haveRight, false);
+          render(!!haveLeft, !!haveRight, false);
+          return;
         }
 
-        processFrame(aimLm, trigLm);
+        processFrame(lm[lIdx], lm[rIdx]);
 
         const haveSight = (aimX!=null && aimY!=null);
-        updateLockState(haveAim, haveTrig, haveSight);
-        render(haveAim, haveTrig, haveSight);
+        updateLockState(true,true, haveSight);
+        render(true,true, haveSight);
       });
 
       video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
@@ -1329,6 +1261,7 @@ videoReady: ${videoReady}
 
       camera = new Camera(video, {
         onFrame: async()=>{
+          // ✅ 关键修复：不要在这里 await video.play()（会偶发卡死）
           if(!videoReady) return;
           await hands.send({image:video});
         },
@@ -1336,16 +1269,23 @@ videoReady: ${videoReady}
       });
 
       await camera.start();
+
+      // ✅ 用户手势内只 play 一次
       await tryPlayOnceInGesture();
 
+      // ✅ 等 video 真正 ready（可控等待；不影响触发/计分逻辑）
       statusEl.textContent = '加载摄像头画面...';
       await waitVideoReady(9000).catch(()=>{});
       updateVideoReady();
 
-      statusEl.textContent = videoReady ? '等待双手...' : '等待摄像头画面…';
+      if(videoReady){
+        statusEl.textContent = '等待双手...';
+      }else{
+        statusEl.textContent = '等待摄像头画面…';
+      }
     }
 
-    // 必须先点击按钮解锁音频，再启动
+    // ✅ 必须先点击按钮解锁音频，再启动摄像头/游戏
     gateBtn.addEventListener('click', async ()=>{
       gateBtn.disabled = true;
       try{
@@ -1365,6 +1305,7 @@ videoReady: ${videoReady}
       });
     });
 
+    // 初始态
     render(false,false,false);
     statusEl.textContent = '准备开始';
   </script>
