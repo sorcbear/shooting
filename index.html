@@ -220,34 +220,39 @@
       }
     }
 
-    /* ✅ 开始页：纯白背景 + 上图下按钮 */
+    /* ✅ 开始页：保证 iPad 横屏也不截断（关键修改） */
     #startGate{
-      position:absolute; inset:0; z-index:30;
+      position:fixed; inset:0; z-index:30;     /* ✅ absolute → fixed */
       display:flex;
       flex-direction:column;
       align-items:center;
-      justify-content:space-between;
+      justify-content:flex-start;              /* ✅ space-between → flex-start */
+      overflow:auto;                           /* ✅ 必要时滚动，永不裁按钮/图片 */
       background:#fff;
       padding:18px;
-      padding-top:calc(6px + env(safe-area-inset-top));
-      padding-bottom:calc(20px + env(safe-area-inset-bottom));
+      padding-top:calc(12px + env(safe-area-inset-top));
+      padding-bottom:calc(24px + env(safe-area-inset-bottom));
       box-sizing:border-box;
+      -webkit-overflow-scrolling:touch;
     }
+
     #gateImgWrap{
       width:min(920px, 96vw);
-      flex:1 1 auto;
+      flex:1 0 auto;                           /* ✅ 不允许被压缩 */
       min-height:0;
       display:flex;
       align-items:center;
       justify-content:center;
+      margin-bottom:20px;                      /* ✅ 与按钮留间距 */
     }
     #gateImg{
       display:block;
       width:100%;
       height:auto;
-      max-height:100%;
+      max-height:60vh;                         /* ✅ 保证按钮永远有空间 */
       object-fit:contain;
     }
+
     #gateBtn{
       width:240px;
       height:60px;
@@ -268,7 +273,7 @@
       -webkit-user-select:none;
       -webkit-tap-highlight-color:transparent;
       touch-action:manipulation;
-      flex:0 0 auto;
+      flex:0 0 auto;                           /* ✅ 禁止被压缩 */
     }
     #gateBtn .line1{
       font-weight:900;
@@ -283,10 +288,13 @@
     }
     #gateBtn:hover{ background:#000; color:#fff; }
     #gateBtn:disabled{ opacity:0.75; cursor:default; }
+
+    /* ✅ 强制：开始页显示时，视频永远不可见（彻底杜绝“闪一下摄像头画面”） */
+    body.gate-on #video{ opacity:0 !important; }
   </style>
 </head>
 
-<body>
+<body class="gate-on">
   <div id="app">
     <div id="leftPane">
       <video id="video" playsinline muted></video>
@@ -985,21 +993,6 @@
       return Math.sqrt(dx*dx + dy*dy + dz*dz);
     }
 
-    // =========================
-    // ✅ 只改这一处：隐藏摄像头画面逻辑（其余保持不动）
-    // - 以前：校准击发时立刻隐藏 video
-    // - 现在：校准击发后“挂起隐藏”，等下一次确实检测到双手+瞄准器时再隐藏
-    // =========================
-    let pendingHideVideo = false;
-    let videoHidden = false;
-    function hideVideoNow(){
-      if(videoHidden) return;
-      videoHidden = true;
-      video.style.opacity = '0';
-      video.style.pointerEvents = 'none';
-    }
-    // =========================
-
     function fire(isCalibrationShot){
       const now = Date.now();
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
@@ -1018,8 +1011,8 @@
         firstShotDone = true;
         mode = MODE.PLAY;
 
-        // ✅ 改动点：不立刻隐藏；改为挂起，等下一次“确实有双手+瞄准器”再隐藏
-        pendingHideVideo = true;
+        video.style.opacity = '0';
+        video.style.pointerEvents = 'none';
 
         statusEl.textContent = '校准完成 ✅ 正式开始';
         hintEl.textContent = '左手"完全捏合"=开枪';
@@ -1146,7 +1139,6 @@ sensitivity: ${sensitivity.toFixed(2)}
         return;
       }
 
-      // ✅ 注意：这里仍以“真实是否双手”决定 lockReady
       if(!haveLeft || !haveRight || !haveSight){
         lockFrames = 0;
         lockReady = false;
@@ -1194,11 +1186,11 @@ sensitivity: ${sensitivity.toFixed(2)}
     // Init
     let hands=null, camera=null;
 
-    // ✅ 宽限（grace）：短暂丢手不清空 aim / 不重置捏合状态（推荐恢复的点）
+    // ✅ 宽限（grace）
     let missBoth = 0;
-    const MISS_TOL = 6; // 约 6 帧宽限（~100ms 左右，取决于帧率）
+    const MISS_TOL = 6;
 
-    // ✅ 只在点击开始后做一次 play（避免 iPad 偶发卡死在 play 的 await）
+    // ✅ 只在点击开始后做一次 play
     let triedPlayOnce = false;
     async function tryPlayOnceInGesture(){
       if(triedPlayOnce) return;
@@ -1236,30 +1228,20 @@ sensitivity: ${sensitivity.toFixed(2)}
         const haveLeft = (lIdx!==-1 && lm[lIdx]);
         const haveRight = (rIdx!==-1 && lm[rIdx]);
 
-        // ✅ 只要“真正有双手”，立刻清零 miss
         if(haveLeft && haveRight){
           missBoth = 0;
 
           processFrame(lm[lIdx], lm[rIdx]);
           const haveSight = (aimX!=null && aimY!=null);
 
-          // ✅ 改动点：挂起隐藏的条件满足时再隐藏（仅隐藏逻辑变更）
-          if(pendingHideVideo && firstShotDone && haveSight){
-            hideVideoNow();
-            pendingHideVideo = false;
-          }
-
           updateLockState(true,true, haveSight);
           render(true,true, haveSight);
           return;
         }
 
-        // ✅ 没有双手：进入宽限累计
         missBoth++;
-
         const inGrace = (missBoth <= MISS_TOL);
 
-        // 宽限期内：不清空 aim，不重置捏合状态（减少闪烁/困惑）
         if(!inGrace){
           aimX = aimY = null;
           isPinched = false;
@@ -1268,21 +1250,19 @@ sensitivity: ${sensitivity.toFixed(2)}
           pinchDistanceHistory = [];
         }
 
-        // haveSight：宽限期内允许沿用上一帧的瞄准镜（避免“字闪/镜没了”）
         const haveSight = (aimX!=null && aimY!=null);
 
-        // updateLockState 仍然用“真实 haveLeft/haveRight”决定是否进入等待双手
         updateLockState(!!haveLeft, !!haveRight, haveSight);
-
-        // render 也用真实手状态 + 是否仍有 sight
         render(!!haveLeft, !!haveRight, haveSight);
       });
 
       video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
       video.addEventListener('playing', ()=>{ updateVideoReady(); }, {once:false});
 
-      video.style.opacity = '1';
-      video.style.pointerEvents = 'auto';
+      // ✅ 摄像头启动阶段也别让它露出来
+      video.style.opacity = '0';
+      video.style.pointerEvents = 'none';
+
       firstShotDone = false;
       lockReady = false;
       lockFrames = 0;
@@ -1290,15 +1270,10 @@ sensitivity: ${sensitivity.toFixed(2)}
 
       missBoth = 0;
 
-      // ✅ 隐藏逻辑相关状态复位（仅隐藏逻辑变更）
-      pendingHideVideo = false;
-      videoHidden = false;
-
       video.style.transform = 'scaleX(-1) translateZ(0)';
 
       camera = new Camera(video, {
         onFrame: async()=>{
-          // ✅ 关键：不要在这里 await video.play()
           if(!videoReady) return;
           await hands.send({image:video});
         },
@@ -1312,10 +1287,10 @@ sensitivity: ${sensitivity.toFixed(2)}
       await waitVideoReady(9000).catch(()=>{});
       updateVideoReady();
 
+      // ✅ 仍然不显示 video（直到校准完成后你本来就会隐藏 video）
       statusEl.textContent = videoReady ? '等待双手...' : '等待摄像头画面…';
     }
 
-    // 必须先点击按钮解锁音频，再启动摄像头/游戏
     gateBtn.addEventListener('click', async ()=>{
       gateBtn.disabled = true;
       try{
@@ -1326,6 +1301,10 @@ sensitivity: ${sensitivity.toFixed(2)}
         gateBtn.disabled = false;
         return;
       }
+
+      // ✅ 关掉 startGate 前，先把 “gate-on” class 去掉
+      //    但我们在 start() 内也把 video opacity 强制为 0，所以不会闪
+      document.body.classList.remove('gate-on');
       startGate.style.display = 'none';
 
       start().catch(e=>{
@@ -1335,7 +1314,9 @@ sensitivity: ${sensitivity.toFixed(2)}
       });
     });
 
-    // 初始态
+    // 初始态：开始页期间彻底不让 video 露出
+    video.style.opacity = '0';
+    video.style.pointerEvents = 'none';
     render(false,false,false);
     statusEl.textContent = '准备开始';
   </script>
