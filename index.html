@@ -142,8 +142,25 @@
 
 
     /* 分享预览层（白底黑字，横屏不裁按钮） */
-    #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
-    #sharePreview.show{ display:block; }
+    #sharePreview{
+      position:absolute;
+      inset:0;
+      z-index:20;
+
+      display:block;               /* 不再使用 display 切换 */
+      opacity:0;
+      visibility:hidden;
+      pointer-events:none;
+
+      transition:opacity 0.18s ease;
+    }
+
+    #sharePreview.show{
+      opacity:1;
+      visibility:visible;
+      pointer-events:auto;
+    }
+
     #sharePreview .sp-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.55); }
 
     #sharePreview .sp-panel{
@@ -895,12 +912,15 @@ function showTenTitle(sum){
         URL.revokeObjectURL(spBlobUrl);
         spBlobUrl = null;
       }
+
       spBlobUrl = URL.createObjectURL(blob);
       spDownloadName = `finger-rifle-${Date.now()}.png`;
       spImg.src = spBlobUrl;
+
       sharePreview.classList.add('show');
       sharePreview.setAttribute('aria-hidden','false');
     }
+
 
     function closeSharePreview(){
       sharePreview.classList.remove('show');
