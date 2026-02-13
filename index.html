@@ -428,7 +428,7 @@
       sensitivity = Math.min(14, Math.max(1.1, gain));
 
       // ✅ 更敏感（放大手移动 -> 准星位移）
-      sensitivity = sensitivity * 1.25; // 1.15~1.6 可自行加大
+      sensitivity = sensitivity * 1.5; // 1.15~1.6 可自行加大
     }
 
     function resize(){
@@ -997,10 +997,10 @@
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    const PINCH_DISTANCE_ON  = 0.20;
-    const PINCH_DISTANCE_OFF = 0.28;
+    const PINCH_DISTANCE_ON  = 0.22;
+    const PINCH_DISTANCE_OFF = 0.3;
 
-    const PINCH_ON_FRAMES  = 3;
+    const PINCH_ON_FRAMES  = 2;
     const PINCH_OFF_FRAMES = 3;
     let pinchOnCount = 0;
     let pinchOffCount = 0;
@@ -1009,7 +1009,7 @@
     let pinchDistanceHistory = [];
 
     // ✅ 掌心控制：更“跟手”+ 更抖
-    let AIM_SMOOTH = 0.10;     // 越小越敏感/越抖（0.08~0.18）
+    let AIM_SMOOTH = 0.06;     // 越小越敏感/越抖（0.08~0.18）
     let AIM_JITTER_PX = 3.0;   // 抖动 CSS 像素（2~6）
 
     function randn(){
