@@ -9,7 +9,6 @@
   <style>
     html,body{margin:0;height:100%;background:#fff;overflow:hidden}
     #app{position:fixed; inset:0; display:flex; flex-direction:column; background:#fff;}
-
     #leftPane{
       position:relative; flex:0 0 66.6667%; min-height:0;
       background:#fff; overflow:hidden;
@@ -20,20 +19,11 @@
       overflow:hidden; display:flex; flex-direction:column;
       padding:12px; gap:10px; box-sizing:border-box;
     }
-
-    /* ✅ iOS Safari：100vh 不是可视高度，横屏底部会被工具栏吃掉
-       ✅ 修复：横屏用 100dvh（动态可视高度），并保留 100vh 作为旧浏览器回退 */
     @media (orientation: landscape){
       #app{flex-direction:row;}
-      #leftPane{
-        flex:0 0 66.6667%;
-        height:100vh;
-        height:100dvh;
-      }
+      #leftPane{flex:0 0 66.6667%; height:100vh;}
       #rightPane{
-        flex:0 0 33.3333%;
-        height:100vh;
-        height:100dvh;
+        flex:0 0 33.3333%; height:100vh;
         border-top:none; border-left:1px solid #eee;
       }
     }
@@ -44,13 +34,7 @@
       will-change: transform;
       backface-visibility: hidden;
       z-index:0;
-
-      /* ✅【唯一修改处】前端永远不显示摄像头画面（后台仍运行） */
-      opacity:0 !important;
-      pointer-events:none !important;
-      background:transparent !important;
-
-      transition:opacity 120ms linear;
+      background:#000; opacity:1; transition:opacity 120ms linear;
     }
     #cv{
       position:absolute; inset:0; width:100%; height:100%;
@@ -236,32 +220,28 @@
       }
     }
 
-    /* ✅ 开始页：改成 grid，保证底部按钮永远可见 */
+    /* ✅ 开始页：纯白背景 + 上图下按钮 */
     #startGate{
       position:absolute; inset:0; z-index:30;
-      display:grid;
-      grid-template-rows: minmax(0, 1fr) auto; /* ✅ 更稳：上方可被压缩到 0 */
-      align-items:stretch;
-      justify-items:center;
-
-      background:#fff;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:space-between;
+      background:#fff; /* ✅ 纯白 */
       padding:18px;
       padding-top:calc(6px + env(safe-area-inset-top));
-      padding-bottom:calc(12px + env(safe-area-inset-bottom));
+      padding-bottom:calc(20px + env(safe-area-inset-bottom));
       box-sizing:border-box;
-
-      overflow:hidden;
     }
 
     #gateImgWrap{
       width:min(920px, 96vw);
+      flex:1 1 auto;
       min-height:0;
       display:flex;
       align-items:center;
       justify-content:center;
-      overflow:hidden;
     }
-
     #gateImg{
       display:block;
       width:100%;
@@ -290,20 +270,8 @@
       -webkit-user-select:none;
       -webkit-tap-highlight-color:transparent;
       touch-action:manipulation;
-
-      margin-top:12px;
+      flex:0 0 auto;
     }
-
-    /* 横屏时略收紧，避免工具栏挤压 */
-    @media (orientation: landscape){
-      #startGate{
-        padding:12px;
-        padding-top:calc(4px + env(safe-area-inset-top));
-        padding-bottom:calc(10px + env(safe-area-inset-bottom));
-      }
-      #gateBtn{ height:54px; }
-    }
-
     #gateBtn .line1{
       font-weight:900;
       font-size:20px;
@@ -354,8 +322,10 @@
         </div>
       </div>
 
+      <!-- ✅ 纯白背景，上面放图，下面按钮 -->
       <div id="startGate">
         <div id="gateImgWrap">
+          <!-- 把你发的图保存为 start-guide.png 放在同目录 -->
           <img id="gateImg" src="start-guide.png" alt="左手瞄准，右手击发" />
         </div>
         <button id="gateBtn">
@@ -437,15 +407,15 @@
 
     function tuneAimByDevice(){
       const phone = isIPhoneLike();
-      followAlpha = phone ? 1 : 0.965;
+      followAlpha = phone ? 1 : 1;
 
       const REF_SHORT = 390;
-      const baseGainPhone = 8;
-      const baseGainPad   = 6;
+      const baseGainPhone = 9;
+      const baseGainPad   = 8;
       const base = phone ? baseGainPhone : baseGainPad;
 
       let gain = base * (REF_SHORT / Math.max(1, shortCss));
-      sensitivity = Math.min(13, Math.max(1.1, gain));
+      sensitivity = Math.min(14, Math.max(1.1, gain));
     }
 
     function resize(){
@@ -485,6 +455,7 @@
       return videoReady;
     }
 
+    // ✅ 稳定启动：等待 video 真正 ready（不改任何射击/计分逻辑）
     function waitVideoReady(timeoutMs=9000){
       return new Promise((resolve, reject)=>{
         const t0 = Date.now();
@@ -737,6 +708,7 @@
       audioCtx = new AC();
 
       preGain = audioCtx.createGain();
+      // ✅ 更像爆炸：整体更大一点
       preGain.gain.setValueAtTime(1.55, audioCtx.currentTime);
 
       compressor = audioCtx.createDynamicsCompressor();
@@ -753,6 +725,7 @@
       limiter.attack.setValueAtTime(0.001, audioCtx.currentTime);
       limiter.release.setValueAtTime(0.08, audioCtx.currentTime);
 
+      // slapback：极轻
       slapDelay = audioCtx.createDelay(0.10);
       slapDelay.delayTime.setValueAtTime(0.030, audioCtx.currentTime);
       slapFB = audioCtx.createGain();
@@ -780,6 +753,7 @@
       if(ctx.state === 'suspended') await ctx.resume();
       audioEnabled = true;
 
+      // iOS 输出挂载小脉冲
       try{
         const t = ctx.currentTime;
         const o = ctx.createOscillator();
@@ -800,6 +774,7 @@
       const data = buf.getChannelData(0);
       for(let i=0;i<n;i++){
         const x = i / n;
+        // ✅ 更像“爆”：前 10~20ms 更猛，然后衰减
         const e = Math.pow(1 - x, 2.15);
         const punch = (x < 0.020) ? 2.25 : 1.0;
         data[i] = (Math.random()*2-1) * e * punch;
@@ -807,11 +782,13 @@
       return buf;
     }
 
+    // ✅ 更爆炸的击发音
     function beep(){
       if(!audioEnabled || !audioCtx || !preGain) return;
       const ctx = audioCtx;
       const t0 = ctx.currentTime;
 
+      // 1) 低频 thump（更像“砰”）
       try{
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -826,8 +803,9 @@
         o.stop(t0 + 0.26);
       }catch{}
 
+      // 2) 爆裂主体：噪声 + 低通下扫（更像“轰”）
       try{
-        const dur = 0.32;
+        const dur = 0.32; // ✅ 尾音更长一点点
         const src = ctx.createBufferSource();
         src.buffer = makeNoiseBuffer(dur);
 
@@ -846,6 +824,7 @@
         src.stop(t0 + dur + 0.03);
       }catch{}
 
+      // 3) 高频 crack：带通短促一刀（让“爆”更炸）
       try{
         const dur = 0.08;
         const src = ctx.createBufferSource();
@@ -871,6 +850,7 @@
       }catch{}
     }
 
+    // Share preview open/close
     function openSharePreview(blob){
       if(spBlobUrl){
         URL.revokeObjectURL(spBlobUrl);
@@ -1054,6 +1034,7 @@
       hintEl.textContent = '左手"完全捏合"=开枪';
     }
 
+    // MediaPipe
     function getHandIndexByLabel(hdList, label){
       for(let i=0;i<hdList.length;i++){
         if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
@@ -1208,6 +1189,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
     // Init
     let hands=null, camera=null;
 
+    // ✅ 只在点击开始后做一次 play（避免 iPad 偶发卡死在 play 的 await）
     let triedPlayOnce = false;
     async function tryPlayOnceInGesture(){
       if(triedPlayOnce) return;
@@ -1230,7 +1212,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
       hands.setOptions({
         maxNumHands:2,
-        modelComplexity:1,
+        modelComplexity:1, // ✅ 恢复到你原来的稳定识别（不改触发逻辑）
         minDetectionConfidence:0.7,
         minTrackingConfidence:0.7
       });
@@ -1279,6 +1261,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
 
       camera = new Camera(video, {
         onFrame: async()=>{
+          // ✅ 关键修复：不要在这里 await video.play()（会偶发卡死）
           if(!videoReady) return;
           await hands.send({image:video});
         },
@@ -1287,8 +1270,10 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
 
       await camera.start();
 
+      // ✅ 用户手势内只 play 一次
       await tryPlayOnceInGesture();
 
+      // ✅ 等 video 真正 ready（可控等待；不影响触发/计分逻辑）
       statusEl.textContent = '加载摄像头画面...';
       await waitVideoReady(9000).catch(()=>{});
       updateVideoReady();
@@ -1300,6 +1285,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       }
     }
 
+    // ✅ 必须先点击按钮解锁音频，再启动摄像头/游戏
     gateBtn.addEventListener('click', async ()=>{
       gateBtn.disabled = true;
       try{
@@ -1319,6 +1305,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       });
     });
 
+    // 初始态
     render(false,false,false);
     statusEl.textContent = '准备开始';
   </script>
