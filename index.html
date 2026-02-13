@@ -447,6 +447,7 @@
 
     // Video readiness
     let videoReady = false;
+    let videoHiddenForever = false;  // ✅ 校准后永远隐藏摄像头，防止闪现
     function updateVideoReady(){
       videoReady = (video.readyState >= 2) && (video.videoWidth > 0) && (video.videoHeight > 0);
       return videoReady;
@@ -1005,6 +1006,7 @@
 
         video.style.opacity = '0';
         video.style.pointerEvents = 'none';
+        videoHiddenForever = true; // ✅ 加这一行：锁死，之后永远不再显示
 
         statusEl.textContent = '校准完成 ✅ 正式开始';
         hintEl.textContent = '左手"完全捏合"=开枪';
@@ -1144,7 +1146,8 @@ sensitivity: ${sensitivity.toFixed(2)}
           statusEl.textContent = '等待双手...';
         }
 
-        if(!firstShotDone){
+        
+        if(!firstShotDone && !videoHiddenForever){
           video.style.opacity = '1';
           video.style.pointerEvents = 'auto';
         }
