@@ -659,18 +659,27 @@ function showTenTitle(sum){
     }
 
     function drawSight(x,y){
+      // 外圈（粗圈）
+      const outerLW = 28 * DPR;
+
       ctx.strokeStyle = '#000';
-      ctx.lineWidth = 28*DPR;
+      ctx.lineWidth = outerLW;
       ctx.beginPath();
       ctx.arc(x,y, sight_outer_r*DPR, 0, Math.PI*2);
       ctx.stroke();
 
-      const rOuter = (sight_outer_r - 14)*DPR;
-      const barW = 8*DPR;
+      // ✅ 新增：外圈“内侧空白区域”两条对称横线（如你给的图）
+      // 位置：紧贴外圈内侧边缘，向内延伸一小段
+      const outerInnerEdgeR = (sight_outer_r*DPR) - outerLW/2;   // 外圈内侧边缘半径
+      const dashLen = 34 * DPR;                                 // 横线长度（可按需微调）
+      const dashThk = 10 * DPR;                                 // 横线厚度（可按需微调）
       ctx.fillStyle = '#000';
-      ctx.fillRect(x-rOuter-20*DPR, y-barW/2, 20*DPR, barW);
-      ctx.fillRect(x+rOuter,        y-barW/2, 20*DPR, barW);
+      // 左横线：从外圈内侧边缘向内伸
+      ctx.fillRect(x - outerInnerEdgeR, y - dashThk/2, dashLen, dashThk);
+      // 右横线：从外圈内侧边缘向内伸
+      ctx.fillRect(x + outerInnerEdgeR - dashLen, y - dashThk/2, dashLen, dashThk);
 
+      // 内圈
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 14*DPR;
       ctx.beginPath();
