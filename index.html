@@ -71,7 +71,7 @@
       font:11px/1.3 ui-monospace,monospace;
       color:#000; background:rgba(255,255,255,0.9);
       border:1px solid #999; border-radius:6px;
-      padding:8px; max-width:240px;
+      padding:8px; max-width:260px;
       display:none;
     }
 
@@ -227,7 +227,7 @@
       flex-direction:column;
       align-items:center;
       justify-content:space-between;
-      background:#fff; /* ✅ 纯白 */
+      background:#fff;
       padding:18px;
       padding-top:calc(6px + env(safe-area-inset-top));
       padding-bottom:calc(20px + env(safe-area-inset-bottom));
@@ -322,10 +322,8 @@
         </div>
       </div>
 
-      <!-- ✅ 纯白背景，上面放图，下面按钮 -->
       <div id="startGate">
         <div id="gateImgWrap">
-          <!-- 把你发的图保存为 start-guide.png 放在同目录 -->
           <img id="gateImg" src="start-guide.png" alt="左手瞄准，右手击发" />
         </div>
         <button id="gateBtn">
@@ -575,18 +573,15 @@
     }
 
     // ============================================================
-    // ✅ 新增：击发手位置符号（只做可视化，不改任何识别/射击原则）
-    // - 只要识别到“捏合射击那只手”（当前代码里用于捏合的是 Left 手），就显示
-    // - 映射做“非等距”（非线性）比例：左右/上下用幂指数曲线压缩/扩展
+    // ✅ 扳机手符号（只做可视化，不改任何识别/射击原则）
     // ============================================================
-    let trigX = null, trigY = null;         // 击发手符号位置（屏幕像素）
-    let trigFollowAlpha = 0.92;             // 单独的平滑（不影响 aim 的平滑）
-    const TRIG_GAMMA_X = 0.78;              // ✅ 非等距：x 方向非线性（<1 更“拉开”边缘）
-    const TRIG_GAMMA_Y = 0.85;              // ✅ 非等距：y 方向非线性
-    let trigSensitivity = 1.65;             // ✅ 独立灵敏度（按屏幕比例调）
+    let trigX = null, trigY = null;
+    let trigFollowAlpha = 0.92;
+    const TRIG_GAMMA_X = 0.78;
+    const TRIG_GAMMA_Y = 0.85;
+    let trigSensitivity = 1.65;
 
     function tuneTriggerByDevice(){
-      // 不影响原来的 tuneAimByDevice；这里单独调一个可视化 gain
       const REF_SHORT = 390;
       const phone = isIPhoneLike();
       const base = phone ? 1.85 : 1.55;
@@ -595,7 +590,6 @@
       trigFollowAlpha = phone ? 0.96 : 0.92;
     }
 
-    // resize 时顺带调一下（只影响符号位置显示）
     const _resizeOrig = resize;
     resize = function(){
       _resizeOrig();
@@ -603,63 +597,52 @@
     };
 
     function warp01(u, gamma){
-      // u in [0,1] -> 非线性映射（中间更密/边缘更疏，达到“非等距”）
-      // 使用以 0.5 为中心的幂曲线：0.5 +/- |d|^gamma
       const d = u - 0.5;
       const s = d < 0 ? -1 : 1;
-      const a = Math.pow(Math.abs(d) * 2, gamma) / 2; // 归一化再压幂
+      const a = Math.pow(Math.abs(d) * 2, gamma) / 2;
       return 0.5 + s * a;
     }
 
     function mapToScreenNonLinear(nx, ny, gammaX, gammaY, gain){
-      // mirror 以保持与视频视觉一致
       let x = 1 - nx;
       let y = ny;
 
-      // 非线性 warp（非等距）
       x = warp01(x, gammaX);
       y = warp01(y, gammaY);
 
       let px = x * W;
       let py = y * H;
 
-      // 与瞄准类似的“绕中心缩放”，但用独立 gain（只用于符号显示）
       px = cx + (px - cx) * gain;
       py = cy + (py - cy) * gain;
 
       return {px, py};
     }
 
-function drawTriggerIcon(x, y){
-  // ✅ 造型：粗黑圆环 + 竖向椭圆（与你给的 SVG 一致）
-  // 只画线条，不填充；不影响任何识别/触发逻辑
-  const ringR   = 30 * DPR;     // 圆环半径（可微调）
-  const ovalW   = 22 * DPR;     // 椭圆宽
-  const ovalH   = 70 * DPR;     // 椭圆高
-  const stroke  = 6  * DPR;     // 线条粗细（可微调）
-  const yShift  = 12 * DPR;     // 椭圆整体向下偏移，让它穿过圆环下半部
+    function drawTriggerIcon(x, y){
+      const ringR   = 30 * DPR;
+      const ovalW   = 22 * DPR;
+      const ovalH   = 70 * DPR;
+      const stroke  = 6  * DPR;
+      const yShift  = 12 * DPR;
 
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = stroke;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = stroke;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
 
-  // 圆环
-  ctx.beginPath();
-  ctx.arc(0, 0, ringR, 0, Math.PI * 2);
-  ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+      ctx.stroke();
 
-  // 竖向椭圆（穿过圆环）
-  ctx.beginPath();
-  ctx.ellipse(0, yShift, ovalW/2, ovalH/2, 0, 0, Math.PI * 2);
-  ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(0, yShift, ovalW/2, ovalH/2, 0, 0, Math.PI * 2);
+      ctx.stroke();
 
-  ctx.restore();
-}
-
-
+      ctx.restore();
+    }
 
     // Draw
     function drawTarget(){
@@ -768,7 +751,6 @@ function drawTriggerIcon(x, y){
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
 
-      // ✅ 新增：只要识别到“捏合射击的手”（Left 手存在），就显示扳机符号
       if(haveLeft && trigX!=null && trigY!=null){
         drawTriggerIcon(trigX, trigY);
       }
@@ -786,7 +768,6 @@ function drawTriggerIcon(x, y){
     let compressor = null;
     let limiter = null;
 
-    // 轻微 slapback（让“砰”更厚一点）
     let slapDelay = null;
     let slapFB = null;
     let slapMix = null;
@@ -800,7 +781,6 @@ function drawTriggerIcon(x, y){
       audioCtx = new AC();
 
       preGain = audioCtx.createGain();
-      // ✅ 更像爆炸：整体更大一点
       preGain.gain.setValueAtTime(1.55, audioCtx.currentTime);
 
       compressor = audioCtx.createDynamicsCompressor();
@@ -817,7 +797,6 @@ function drawTriggerIcon(x, y){
       limiter.attack.setValueAtTime(0.001, audioCtx.currentTime);
       limiter.release.setValueAtTime(0.08, audioCtx.currentTime);
 
-      // slapback：极轻
       slapDelay = audioCtx.createDelay(0.10);
       slapDelay.delayTime.setValueAtTime(0.030, audioCtx.currentTime);
       slapFB = audioCtx.createGain();
@@ -845,7 +824,6 @@ function drawTriggerIcon(x, y){
       if(ctx.state === 'suspended') await ctx.resume();
       audioEnabled = true;
 
-      // iOS 输出挂载小脉冲
       try{
         const t = ctx.currentTime;
         const o = ctx.createOscillator();
@@ -866,7 +844,6 @@ function drawTriggerIcon(x, y){
       const data = buf.getChannelData(0);
       for(let i=0;i<n;i++){
         const x = i / n;
-        // ✅ 更像“爆”：前 10~20ms 更猛，然后衰减
         const e = Math.pow(1 - x, 2.15);
         const punch = (x < 0.020) ? 2.25 : 1.0;
         data[i] = (Math.random()*2-1) * e * punch;
@@ -874,13 +851,11 @@ function drawTriggerIcon(x, y){
       return buf;
     }
 
-    // ✅ 更爆炸的击发音
     function beep(){
       if(!audioEnabled || !audioCtx || !preGain) return;
       const ctx = audioCtx;
       const t0 = ctx.currentTime;
 
-      // 1) 低频 thump（更像“砰”）
       try{
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -895,9 +870,8 @@ function drawTriggerIcon(x, y){
         o.stop(t0 + 0.26);
       }catch{}
 
-      // 2) 爆裂主体：噪声 + 低通下扫（更像“轰”）
       try{
-        const dur = 0.32; // ✅ 尾音更长一点点
+        const dur = 0.32;
         const src = ctx.createBufferSource();
         src.buffer = makeNoiseBuffer(dur);
 
@@ -916,7 +890,6 @@ function drawTriggerIcon(x, y){
         src.stop(t0 + dur + 0.03);
       }catch{}
 
-      // 3) 高频 crack：带通短促一刀（让“爆”更炸）
       try{
         const dur = 0.08;
         const src = ctx.createBufferSource();
@@ -1064,6 +1037,7 @@ function drawTriggerIcon(x, y){
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
+    // （你强调“不是参数问题”，这里不依赖 handedness；阈值保留你当前版本）
     const PINCH_DISTANCE_ON  = 0.22;
     const PINCH_DISTANCE_OFF = 0.26;
 
@@ -1091,6 +1065,17 @@ function drawTriggerIcon(x, y){
       const dy = p1.y - p2.y;
       const dz = (p1.z || 0) - (p2.z || 0);
       return Math.sqrt(dx*dx + dy*dy + dz*dz);
+    }
+
+    // ✅ 新增：计算一只手的 pinchRatio（用于“自动判定哪只手在捏合”）
+    function calcPinchRatio(handLm){
+      const thumb = handLm[4];
+      const index = handLm[8];
+      const wrist = handLm[0];
+      const iMcp  = handLm[5];
+      const tipDist3D = distance3D(thumb, index);
+      const palmSize  = Math.max(1e-6, distance3D(wrist, iMcp));
+      return tipDist3D / palmSize;
     }
 
     function fire(isCalibrationShot){
@@ -1127,21 +1112,14 @@ function drawTriggerIcon(x, y){
       hintEl.textContent = '左手"完全捏合"=开枪';
     }
 
-    // MediaPipe
-    function getHandIndexByLabel(hdList, label){
-      for(let i=0;i<hdList.length;i++){
-        if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
-      }
-      return -1;
-    }
-
-    function processFrame(leftLm, rightLm){
+    // MediaPipe 核心处理（✅ 改：不再依赖 Left/Right label，改为“pinchRatio更小那只=扳机手”）
+    function processFrame(triggerLm, aimLm){
       const now = Date.now();
       if(now < freezeUntil) return;
       if(!videoReady) return;
 
-      // ====== 右手：瞄准（原逻辑不变）======
-      const rTip = rightLm[8];
+      // ====== 瞄准手：食指指尖做瞄准（原逻辑不变，只是换成 aimLm）======
+      const rTip = aimLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
       if(aimX==null){ aimX=aimP.px; aimY=aimP.py; }
@@ -1150,9 +1128,8 @@ function drawTriggerIcon(x, y){
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
-      // ====== ✅ 左手：新增“击发手位置符号”（只显示，不改触发原则）======
-      // 选择 Left 手的食指指尖作为位置代表（你也可换成 wrist/掌心，这里不影响捏合判定）
-      const lTipForIcon = leftLm[8];
+      // ====== 扳机手符号显示（只显示，不改触发原则）======
+      const lTipForIcon = triggerLm[8];
       const trigP = mapToScreenNonLinear(lTipForIcon.x, lTipForIcon.y, TRIG_GAMMA_X, TRIG_GAMMA_Y, trigSensitivity);
       if(trigX==null){ trigX = trigP.px; trigY = trigP.py; }
       else{
@@ -1160,11 +1137,11 @@ function drawTriggerIcon(x, y){
         trigY = ema(trigY, trigP.py, trigFollowAlpha);
       }
 
-      // ====== 左手：捏合判定（原逻辑不变）======
-      const lThumb = leftLm[4];
-      const lIndex = leftLm[8];
-      const wrist  = leftLm[0];
-      const iMcp   = leftLm[5];
+      // ====== 扳机手：捏合判定（原逻辑不变，只是换成 triggerLm）======
+      const lThumb = triggerLm[4];
+      const lIndex = triggerLm[8];
+      const wrist  = triggerLm[0];
+      const iMcp   = triggerLm[5];
 
       const tipDist3D = distance3D(lThumb, lIndex);
       const palmSize = Math.max(1e-6, distance3D(wrist, iMcp));
@@ -1251,8 +1228,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
         lockFrames = 0;
         lockReady = false;
 
-        // ✅ 新增符号显示变量清理（只影响符号，不影响射击原则）
-        // 目的：没有 left 时不显示旧位置；不改任何捏合/射击逻辑
         trigX = trigY = null;
 
         if(firstShotDone){
@@ -1298,7 +1273,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
     // Init
     let hands=null, camera=null;
 
-    // ✅ 只在点击开始后做一次 play（避免 iPad 偶发卡死在 play 的 await）
     let triedPlayOnce = false;
     async function tryPlayOnceInGesture(){
       if(triedPlayOnce) return;
@@ -1321,7 +1295,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
       hands.setOptions({
         maxNumHands:2,
-        modelComplexity:1, // ✅ 恢复到你原来的稳定识别（不改触发逻辑）
+        modelComplexity:1,
         minDetectionConfidence:0.7,
         minTrackingConfidence:0.7
       });
@@ -1329,34 +1303,56 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       hands.onResults(res=>{
         updateVideoReady();
 
-        const lm = res.multiHandLandmarks||[];
-        const hd = res.multiHandedness||[];
-        const lIdx = getHandIndexByLabel(hd, 'Left');
-        const rIdx = getHandIndexByLabel(hd, 'Right');
+        const lm = res.multiHandLandmarks || [];
 
-        const haveLeft = (lIdx!==-1 && lm[lIdx]);
-        const haveRight = (rIdx!==-1 && lm[rIdx]);
+        // ✅ 不再依赖 label：只要两只手都在，就用 pinchRatio 选“扳机手”
+        const haveTwoHands = (lm.length >= 2 && lm[0] && lm[1]);
 
-        if(!haveLeft || !haveRight){
+        if(!haveTwoHands){
           aimX = aimY = null;
           isPinched = false;
           triggerLocked = false;
           pinchOnCount = pinchOffCount = 0;
           pinchDistanceHistory = [];
 
-          // ✅ 新增符号：若缺少 Left，则符号也消失（只显示层面）
-          if(!haveLeft) trigX = trigY = null;
+          trigX = trigY = null;
 
-          updateLockState(!!haveLeft, !!haveRight, false);
-          render(!!haveLeft, !!haveRight, false);
+          updateLockState(false, false, false);
+          render(false, false, false);
           return;
         }
 
-        processFrame(lm[lIdx], lm[rIdx]);
+        // 选扳机手 = pinchRatio 更小的那只；另一只 = 瞄准手
+        const pr0 = calcPinchRatio(lm[0]);
+        const pr1 = calcPinchRatio(lm[1]);
+
+        const triggerLm = (pr0 <= pr1) ? lm[0] : lm[1];
+        const aimLm     = (pr0 <= pr1) ? lm[1] : lm[0];
+
+        // 如果你开 DEBUG，可以看到是否“扳机手”稳定
+        if(DEBUG_MODE){
+          debugInfo.innerHTML = `
+mode: ${mode}
+firstShotDone: ${firstShotDone}
+lockReady: ${lockReady}
+aim: ${aimX? 'yes':'no'}
+pinch0: ${pr0.toFixed(3)}
+pinch1: ${pr1.toFixed(3)}
+triggerPick: ${(pr0<=pr1)?'0':'1'}
+triggerLocked: ${triggerLocked}
+videoReady: ${videoReady}
+readyState: ${video.readyState}
+vw/vh: ${video.videoWidth}x${video.videoHeight}
+`.trim();
+        }
+
+        // ✅ 注意：这里不再把“缺手”就清空到 WAIT_BOTH 的 Left/Right；
+        // 两只手齐全就走原流程
+        processFrame(triggerLm, aimLm);
 
         const haveSight = (aimX!=null && aimY!=null);
-        updateLockState(true,true, haveSight);
-        render(true,true, haveSight);
+        updateLockState(true, true, haveSight);   // 继续沿用原 UI 逻辑：需要“两只手”
+        render(true, true, haveSight);
       });
 
       video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
@@ -1369,14 +1365,12 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       lockFrames = 0;
       mode = MODE.WAIT_BOTH;
 
-      // ✅ 新增符号状态初始化（不影响触发）
       trigX = trigY = null;
 
       video.style.transform = 'scaleX(-1) translateZ(0)';
 
       camera = new Camera(video, {
         onFrame: async()=>{
-          // ✅ 关键修复：不要在这里 await video.play()（会偶发卡死）
           if(!videoReady) return;
           await hands.send({image:video});
         },
@@ -1385,10 +1379,8 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
 
       await camera.start();
 
-      // ✅ 用户手势内只 play 一次
       await tryPlayOnceInGesture();
 
-      // ✅ 等 video 真正 ready（可控等待；不影响触发/计分逻辑）
       statusEl.textContent = '加载摄像头画面...';
       await waitVideoReady(9000).catch(()=>{});
       updateVideoReady();
@@ -1400,7 +1392,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       }
     }
 
-    // ✅ 必须先点击按钮解锁音频，再启动摄像头/游戏
     gateBtn.addEventListener('click', async ()=>{
       gateBtn.disabled = true;
       try{
@@ -1420,7 +1411,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       });
     });
 
-    // 初始态
     render(false,false,false);
     statusEl.textContent = '准备开始';
   </script>
