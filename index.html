@@ -1050,94 +1050,98 @@
       return -1;
     }
 
-    function processFrame(leftLm, rightLm){
-      const now = Date.now();
-      if(now < freezeUntil) return;
-      if(!videoReady) return;
+function processFrame(leftLm, rightLm){
+  const now = Date.now();
+  if(now < freezeUntil) return;
+  if(!videoReady) return;
 
-      const rTip = rightLm[8];
-      const aimP = mapToScreen(rTip.x, rTip.y);
+  // ====== ✅ 改为掌心中心控制 ======
+  const palmPoints = [0,5,9,13,17];
+  let sx = 0, sy = 0;
 
-      if(aimX==null){ aimX=aimP.px; aimY=aimP.py; }
-      else{
-        aimX = ema(aimX, aimP.px, followAlpha);
-        aimY = ema(aimY, aimP.py, followAlpha);
-      }
+  for(let i=0;i<palmPoints.length;i++){
+    sx += rightLm[palmPoints[i]].x;
+    sy += rightLm[palmPoints[i]].y;
+  }
 
-      const lThumb = leftLm[4];
-      const lIndex = leftLm[8];
-      const wrist  = leftLm[0];
-      const iMcp   = leftLm[5];
+  const nx = sx / palmPoints.length;
+  const ny = sy / palmPoints.length;
 
-      const tipDist3D = distance3D(lThumb, lIndex);
-      const palmSize = Math.max(1e-6, distance3D(wrist, iMcp));
-      const pinchRatio = tipDist3D / palmSize;
+  const aimP = mapToScreen(nx, ny);
 
-      addToPinchHistory(pinchRatio);
-      const smoothedRatio = getPinchDistanceSmoothed();
+  // ====== 更强平滑（射击风格） ======
+  const SMOOTH = 0.18;
 
-      if(DEBUG_MODE){
-        debugInfo.innerHTML = `
-mode: ${mode}
-firstShotDone: ${firstShotDone}
-lockReady: ${lockReady}
-aim: ${aimX? 'yes':'no'}
-pinch: ${smoothedRatio.toFixed(3)}
-triggerLocked: ${triggerLocked}
-videoReady: ${videoReady}
-readyState: ${video.readyState}
-vw/vh: ${video.videoWidth}x${video.videoHeight}
-        `.trim();
-      }
+  if(aimX==null){
+    aimX = aimP.px;
+    aimY = aimP.py;
+  }else{
+    aimX = ema(aimX, aimP.px, SMOOTH);
+    aimY = ema(aimY, aimP.py, SMOOTH);
+  }
 
-      if(!firstShotDone && !lockReady){
-        isPinched = false;
+  // ====== 击发逻辑保持原样 ======
+  const lThumb = leftLm[4];
+  const lIndex = leftLm[8];
+  const wrist  = leftLm[0];
+  const iMcp   = leftLm[5];
+
+  const tipDist3D = distance3D(lThumb, lIndex);
+  const palmSize = Math.max(1e-6, distance3D(wrist, iMcp));
+  const pinchRatio = tipDist3D / palmSize;
+
+  addToPinchHistory(pinchRatio);
+  const smoothedRatio = getPinchDistanceSmoothed();
+
+  if(!firstShotDone && !lockReady){
+    isPinched = false;
+    triggerLocked = false;
+    pinchOnCount = pinchOffCount = 0;
+    pinchDistanceHistory = [];
+    return;
+  }
+
+  if(triggerLocked){
+    if(smoothedRatio > PINCH_DISTANCE_OFF){
+      pinchOffCount++;
+      if(pinchOffCount >= PINCH_OFF_FRAMES){
         triggerLocked = false;
-        pinchOnCount = pinchOffCount = 0;
-        pinchDistanceHistory = [];
-        return;
-      }
-
-      if(triggerLocked){
-        if(smoothedRatio > PINCH_DISTANCE_OFF){
-          pinchOffCount++;
-          if(pinchOffCount >= PINCH_OFF_FRAMES){
-            triggerLocked = false;
-            isPinched = false;
-            pinchOffCount = 0;
-            pinchOnCount = 0;
-          }
-        }else{
-          pinchOffCount = 0;
-        }
-        return;
-      }
-
-      const isPinchConditionMet = (smoothedRatio < PINCH_DISTANCE_ON);
-      const isReleaseConditionMet = (smoothedRatio > PINCH_DISTANCE_OFF);
-
-      if(isPinchConditionMet){
-        pinchOnCount++;
+        isPinched = false;
         pinchOffCount = 0;
-      }else if(isReleaseConditionMet){
-        pinchOffCount++;
         pinchOnCount = 0;
-      }else{
-        pinchOnCount = Math.max(0, pinchOnCount - 1);
-        pinchOffCount = Math.max(0, pinchOffCount - 1);
       }
-
-      if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
-        isPinched = true;
-        pinchOnCount = 0;
-
-        if(!firstShotDone) fire(true);
-        else fire(false);
-
-        triggerLocked = true;
-        pinchOffCount = 0;
-      }
+    }else{
+      pinchOffCount = 0;
     }
+    return;
+  }
+
+  const isPinchConditionMet = (smoothedRatio < PINCH_DISTANCE_ON);
+  const isReleaseConditionMet = (smoothedRatio > PINCH_DISTANCE_OFF);
+
+  if(isPinchConditionMet){
+    pinchOnCount++;
+    pinchOffCount = 0;
+  }else if(isReleaseConditionMet){
+    pinchOffCount++;
+    pinchOnCount = 0;
+  }else{
+    pinchOnCount = Math.max(0, pinchOnCount - 1);
+    pinchOffCount = Math.max(0, pinchOffCount - 1);
+  }
+
+  if(!isPinched && pinchOnCount >= PINCH_ON_FRAMES){
+    isPinched = true;
+    pinchOnCount = 0;
+
+    if(!firstShotDone) fire(true);
+    else fire(false);
+
+    triggerLocked = true;
+    pinchOffCount = 0;
+  }
+}
+
 
     function updateLockState(haveLeft, haveRight, haveSight){
       if(!videoReady){
@@ -1307,14 +1311,6 @@ hands.onResults(res=>{
   updateLockState(false,false, haveSight);
   render(false,false, haveSight);
 });
-
-
-        processFrame(lm[lIdx], lm[rIdx]);
-
-        const haveSight = (aimX!=null && aimY!=null);
-        updateLockState(true,true, haveSight);
-        render(true,true, haveSight);
-      });
 
       video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
       video.addEventListener('playing', ()=>{ updateVideoReady(); }, {once:false});
