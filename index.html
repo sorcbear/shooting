@@ -55,6 +55,22 @@
     #hint{ display:none; }
 
     #log{
+      .log-group{
+        margin-bottom:14px;
+      }
+
+      .log-group.old{
+        font-size:20px;        /* 🔥 旧的10发变大 */
+        line-height:1.8;       /* 🔥 行距加大 */
+        font-weight:800;
+      }
+
+      .log-group.current{
+        font-size:14px;
+        line-height:1.35;
+      }
+
+      
       flex:1 1 auto; min-height:0;
       font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
       color:#111;background:rgba(255,255,255,.96);
@@ -531,39 +547,43 @@
       setTimeout(()=>celebration.classList.remove('show'), 5000);
     }
 
-    function renderScores(){
-      const n = shotScores.length;
-      if(n === 0){
-        logEl.textContent = '';
-        return;
-      }
+function renderScores(){
+  const n = shotScores.length;
+  if(n === 0){
+    logEl.innerHTML = '';
+    return;
+  }
 
-      let out = '';
-      const groups = Math.ceil(n / 10);
+  let html = '';
+  const groups = Math.ceil(n / 10);
 
-      for(let g = groups - 1; g >= 0; g--){
-        const start = g * 10;
-        const end = Math.min(n, start + 10);
+  for(let g = groups - 1; g >= 0; g--){
+    const start = g * 10;
+    const end = Math.min(n, start + 10);
 
-        let sum = 0;
-        for(let i = start; i < end; i++) sum += shotScores[i];
+    let sum = 0;
+    for(let i = start; i < end; i++) sum += shotScores[i];
 
-        out += `Total(${start+1}-${end}): ${sum.toFixed(1)}\n`;
+    // 🔥 判断是否为“当前最新10发”
+    const isCurrentGroup = (g === groups - 1);
 
-        if((end - start) === 10 && end > lastTenShownEnd){
-          lastTenShownEnd = end;
-          showTenTitle(sum);
-        }
+    const cls = isCurrentGroup ? 'current' : 'old';
 
-        for(let i = end - 1; i >= start; i--){
-          out += `${i+1}.  ${shotScores[i].toFixed(1)}\n`;
-        }
-        out += '\n';
-      }
+    html += `<div class="log-group ${cls}">`;
 
-      logEl.textContent = out.trim();
-      logEl.scrollTop = 0;
+    html += `<div>Total(${start+1}-${end}): ${sum.toFixed(1)}</div>`;
+
+    for(let i = end - 1; i >= start; i--){
+      html += `<div>${i+1}. ${shotScores[i].toFixed(1)}</div>`;
     }
+
+    html += `</div>`;
+  }
+
+  logEl.innerHTML = html;
+  logEl.scrollTop = 0;
+}
+
 
     // Utils
     const ema = (prev,next,a)=> prev + (next-prev)*a;
