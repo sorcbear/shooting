@@ -28,17 +28,13 @@
       }
     }
 
-    /* ✅ 摄像头画面：后台跑，但前端不显示（不影响 MediaPipe 输入） */
     #video{
       position:absolute; inset:0; width:100%; height:100%;
       object-fit:cover; transform:scaleX(-1) translateZ(0);
       will-change: transform;
       backface-visibility: hidden;
       z-index:0;
-      background:#000;
-      opacity:0;                 /* ✅ 永远隐藏 */
-      pointer-events:none;       /* ✅ 不挡交互 */
-      transition:none;           /* ✅ 避免闪烁 */
+      background:#000; opacity:1; transition:opacity 120ms linear;
     }
     #cv{
       position:absolute; inset:0; width:100%; height:100%;
@@ -231,7 +227,7 @@
       flex-direction:column;
       align-items:center;
       justify-content:space-between;
-      background:#fff;
+      background:#fff; /* ✅ 纯白 */
       padding:18px;
       padding-top:calc(6px + env(safe-area-inset-top));
       padding-bottom:calc(20px + env(safe-area-inset-bottom));
@@ -329,6 +325,7 @@
       <!-- ✅ 纯白背景，上面放图，下面按钮 -->
       <div id="startGate">
         <div id="gateImgWrap">
+          <!-- 把你发的图保存为 start-guide.png 放在同目录 -->
           <img id="gateImg" src="start-guide.png" alt="左手瞄准，右手击发" />
         </div>
         <button id="gateBtn">
@@ -617,90 +614,65 @@
       ctx.stroke();
     }
 
-    /* ✅ 说明文字：移到正方形上方 + 更大 */
-function drawTopMessage(lines){
-  const half = targetSquareHalf * DPR;
+    function drawGuideOverlay(haveLeft, haveRight, haveSight){
+      const half = targetSquareHalf * DPR;
+      const boxY = cy - half;
+      const boxW = 2*half;
+      const boxH = 2*half;
 
-  // 顶部安全区 & 正方形上沿
-  const safeTop = 14*DPR + (12*DPR);
-  const maxY = (cy - half) - 10*DPR; // 正方形上方 10px
-  if(maxY <= safeTop) return;
+      const fontPx = Math.min(60*DPR, Math.max(28*DPR, Math.round(boxH * 0.22)));
+      const lineH  = fontPx * 1.08;
 
-  // 可用区域
-  const areaH = Math.max(1, maxY - safeTop);
-  const maxW = Math.max(1, W - 24*DPR);
+      let msg = '';
+      if(!videoReady){
+        msg = '等待摄像头画面…';
+      }else if(!haveLeft || !haveRight || !haveSight){
+        msg = '移动双手位置\n直到露出瞄准器';
+      }else if(!firstShotDone){
+        if(!lockReady) msg = '请对准靶心\n保持一下';
+        else msg = '已锁定 ✅\n捏合击发校准';
+      }else{
+        msg = '';
+      }
+      if(!msg) return;
 
-  // 初始字号（比之前小一点，更稳）
-  let fontPx = Math.min(52*DPR, Math.max(26*DPR, Math.round((2*half) * 0.18)));
-  let lineH  = fontPx * 1.18;
+      const lines = msg.split('\n');
 
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+      const safeR = (targetDotR*DPR) + (18*DPR);
+      const topAreaY1 = boxY + 10*DPR;
+      const topAreaY2 = (cy - safeR) - 10*DPR;
 
-  // 反复缩放，直到宽/高都放得下
-  for(let iter=0; iter<18; iter++){
-    ctx.font = `900 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      let blockH = lines.length * lineH;
+      let maxAllowedH = Math.max(10*DPR, topAreaY2 - topAreaY1);
+      let scale = Math.min(1, maxAllowedH / blockH);
+      const fp = fontPx * scale;
+      const lh = lineH * scale;
 
-    let maxTextW = 0;
-    for(const t of lines) maxTextW = Math.max(maxTextW, ctx.measureText(t).width);
+      ctx.save();
+      ctx.font = `900 ${fp}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
 
-    const padX = 14*DPR;
-    const padY = 10*DPR;
+      let maxTextW = 0;
+      for(const t of lines) maxTextW = Math.max(maxTextW, ctx.measureText(t).width);
+      const padX = 10*DPR;
+      const padY = 8*DPR;
+      const bw = Math.min(boxW - 16*DPR, maxTextW + padX*2);
+      const bh = lines.length*lh + padY*2;
 
-    const bw = Math.min(maxW, maxTextW + padX*2);
-    const bh = lines.length*lineH + padY*2;
+      const bx = cx - bw/2;
+      const by = topAreaY1 + (maxAllowedH - bh)/2;
 
-    // 宽或高超了就继续缩小
-    if((maxTextW + padX*2) > maxW || bh > areaH){
-      fontPx *= 0.90;
-      lineH = fontPx * 1.18;
-      continue;
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillRect(bx, by, bw, bh);
+
+      ctx.fillStyle = '#000';
+      for(let i=0;i<lines.length;i++){
+        const yy = by + padY + lh/2 + i*lh;
+        ctx.fillText(lines[i], cx, yy);
+      }
+      ctx.restore();
     }
-
-    // 计算摆放位置：在 safeTop~maxY 中垂直居中
-    const bx = cx - bw/2;
-    const by = safeTop + (areaH - bh)/2;
-
-    // ✅ 白底提示块（不要任何灰色边框）
-    ctx.fillStyle = 'rgba(255,255,255,0.94)';
-    ctx.fillRect(bx, by, bw, bh);
-
-    // 画字
-    ctx.fillStyle = '#000';
-    for(let i=0;i<lines.length;i++){
-      const yy = by + padY + lineH/2 + i*lineH;
-      ctx.fillText(lines[i], cx, yy);
-    }
-    ctx.restore();
-    return;
-  }
-
-  // 兜底：如果实在放不下，就不画（避免超出屏幕）
-  ctx.restore();
-}
-
-
-function drawGuideOverlay(haveLeft, haveRight, haveSight){
-  let msg = '';
-
-  if(!videoReady){
-    msg = '等待摄像头画面…';
-  }else if(!haveLeft || !haveRight || !haveSight){
-    // ✅ 按你要求：两行，放在正方形上方
-    msg = '双手距离屏幕50cm以上\n移动位置，直到屏幕上出现瞄准器';
-  }else if(!firstShotDone){
-    if(!lockReady) msg = '请对准靶心保持一下';
-    else msg = '已锁定 ✅\n捏合击发校准';
-  }else{
-    msg = '';
-  }
-
-  if(!msg) return;
-  const lines = msg.split('\n');
-  drawTopMessage(lines);
-}
-
 
     function render(haveLeft, haveRight, haveSight){
       drawTarget();
@@ -737,6 +709,7 @@ function drawGuideOverlay(haveLeft, haveRight, haveSight){
       audioCtx = new AC();
 
       preGain = audioCtx.createGain();
+      // ✅ 更像爆炸：整体更大一点
       preGain.gain.setValueAtTime(1.55, audioCtx.currentTime);
 
       compressor = audioCtx.createDynamicsCompressor();
@@ -802,6 +775,7 @@ function drawGuideOverlay(haveLeft, haveRight, haveSight){
       const data = buf.getChannelData(0);
       for(let i=0;i<n;i++){
         const x = i / n;
+        // ✅ 更像“爆”：前 10~20ms 更猛，然后衰减
         const e = Math.pow(1 - x, 2.15);
         const punch = (x < 0.020) ? 2.25 : 1.0;
         data[i] = (Math.random()*2-1) * e * punch;
@@ -809,11 +783,13 @@ function drawGuideOverlay(haveLeft, haveRight, haveSight){
       return buf;
     }
 
+    // ✅ 更爆炸的击发音
     function beep(){
       if(!audioEnabled || !audioCtx || !preGain) return;
       const ctx = audioCtx;
       const t0 = ctx.currentTime;
 
+      // 1) 低频 thump（更像“砰”）
       try{
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -828,8 +804,9 @@ function drawGuideOverlay(haveLeft, haveRight, haveSight){
         o.stop(t0 + 0.26);
       }catch{}
 
+      // 2) 爆裂主体：噪声 + 低通下扫（更像“轰”）
       try{
-        const dur = 0.32;
+        const dur = 0.32; // ✅ 尾音更长一点点
         const src = ctx.createBufferSource();
         src.buffer = makeNoiseBuffer(dur);
 
@@ -848,6 +825,7 @@ function drawGuideOverlay(haveLeft, haveRight, haveSight){
         src.stop(t0 + dur + 0.03);
       }catch{}
 
+      // 3) 高频 crack：带通短促一刀（让“爆”更炸）
       try{
         const dur = 0.08;
         const src = ctx.createBufferSource();
@@ -1041,7 +1019,6 @@ function drawGuideOverlay(haveLeft, haveRight, haveSight){
         firstShotDone = true;
         mode = MODE.PLAY;
 
-        // ✅ 摄像头本来就隐藏了，这里不需要再切换；但保留逻辑不动
         video.style.opacity = '0';
         video.style.pointerEvents = 'none';
 
@@ -1178,10 +1155,9 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
           statusEl.textContent = '等待双手...';
         }
 
-        // ✅ 以前这里会把视频显示出来；现在前端始终不显示摄像头画面
         if(!firstShotDone){
-          video.style.opacity = '0';
-          video.style.pointerEvents = 'none';
+          video.style.opacity = '1';
+          video.style.pointerEvents = 'auto';
         }
         return;
       }
@@ -1237,7 +1213,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
       hands.setOptions({
         maxNumHands:2,
-        modelComplexity:1,
+        modelComplexity:1, // ✅ 恢复到你原来的稳定识别（不改触发逻辑）
         minDetectionConfidence:0.7,
         minTrackingConfidence:0.7
       });
@@ -1275,10 +1251,8 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
       video.addEventListener('playing', ()=>{ updateVideoReady(); }, {once:false});
 
-      // ✅ 前端始终隐藏摄像头画面
-      video.style.opacity = '0';
-      video.style.pointerEvents = 'none';
-
+      video.style.opacity = '1';
+      video.style.pointerEvents = 'auto';
       firstShotDone = false;
       lockReady = false;
       lockFrames = 0;
@@ -1288,6 +1262,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
 
       camera = new Camera(video, {
         onFrame: async()=>{
+          // ✅ 关键修复：不要在这里 await video.play()（会偶发卡死）
           if(!videoReady) return;
           await hands.send({image:video});
         },
@@ -1296,8 +1271,10 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
 
       await camera.start();
 
+      // ✅ 用户手势内只 play 一次
       await tryPlayOnceInGesture();
 
+      // ✅ 等 video 真正 ready（可控等待；不影响触发/计分逻辑）
       statusEl.textContent = '加载摄像头画面...';
       await waitVideoReady(9000).catch(()=>{});
       updateVideoReady();
