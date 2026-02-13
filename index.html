@@ -408,11 +408,11 @@
 
     function tuneAimByDevice(){
       const phone = isIPhoneLike();
-      followAlpha = phone ? 1 : 0.965;
+      followAlpha = phone ? 1 : 1;
 
       const REF_SHORT = 390;
-      const baseGainPhone = 8;
-      const baseGainPad   = 6;
+      const baseGainPhone = 9;
+      const baseGainPad   = 8;
       const base = phone ? baseGainPhone : baseGainPad;
 
       let gain = base * (REF_SHORT / Math.max(1, shortCss));
@@ -973,7 +973,7 @@
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    const PINCH_DISTANCE_ON  = 0.20;
+    const PINCH_DISTANCE_ON  = 0.18;
     const PINCH_DISTANCE_OFF = 0.26;
 
     const PINCH_ON_FRAMES  = 2;
