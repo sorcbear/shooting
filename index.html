@@ -1221,28 +1221,93 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
         minTrackingConfidence:0.7
       });
 
-      hands.onResults(res=>{
-        updateVideoReady();
+// ====== ✅ 抗抖：稳定追踪两只手的“角色” ======
+let lastLW = null, lastRW = null;        // 上一帧左右手 wrist 位置
+let missBoth = 0;                        // 连续“不是双手”的帧数
+const MISS_TOL = 6;                      // 宽限帧数：6帧左右（~100ms）
 
-        const lm = res.multiHandLandmarks||[];
-        const hd = res.multiHandedness||[];
-        const lIdx = getHandIndexByLabel(hd, 'Left');
-        const rIdx = getHandIndexByLabel(hd, 'Right');
+function wristOf(lm){ return lm && lm[0] ? {x: lm[0].x, y: lm[0].y} : null; }
+function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; }
 
-        const haveLeft = (lIdx!==-1 && lm[lIdx]);
-        const haveRight = (rIdx!==-1 && lm[rIdx]);
+// 在两只手都存在时，用“距离上一帧 wrist 最近”来决定谁是 left-role / right-role
+function assignByContinuity(lmList){
+  // lmList: [lm0, lm1] 只考虑前两只
+  const w0 = wristOf(lmList[0]);
+  const w1 = wristOf(lmList[1]);
+  if(!w0 || !w1) return null;
 
-        if(!haveLeft || !haveRight){
-          aimX = aimY = null;
-          isPinched = false;
-          triggerLocked = false;
-          pinchOnCount = pinchOffCount = 0;
-          pinchDistanceHistory = [];
+  // 如果没有历史，就用 x 排序做初始分配（只用于第一次）
+  if(!lastLW || !lastRW){
+    // 注意：这里的 left-role/right-role 只是“角色”，不等同于真实左右手
+    if(w0.x <= w1.x){
+      lastLW = w0; lastRW = w1;
+      return {L: lmList[0], R: lmList[1], LW:w0, RW:w1};
+    }else{
+      lastLW = w1; lastRW = w0;
+      return {L: lmList[1], R: lmList[0], LW:w1, RW:w0};
+    }
+  }
 
-          updateLockState(!!haveLeft, !!haveRight, false);
-          render(!!haveLeft, !!haveRight, false);
-          return;
-        }
+  // 两种匹配： (0->L,1->R) 或 (0->R,1->L)，选总距离更小的
+  const costA = dist2(w0,lastLW) + dist2(w1,lastRW);
+  const costB = dist2(w0,lastRW) + dist2(w1,lastLW);
+
+  if(costA <= costB){
+    lastLW = w0; lastRW = w1;
+    return {L: lmList[0], R: lmList[1], LW:w0, RW:w1};
+  }else{
+    lastLW = w1; lastRW = w0;
+    return {L: lmList[1], R: lmList[0], LW:w1, RW:w0};
+  }
+}
+
+hands.onResults(res=>{
+  updateVideoReady();
+
+  const lm = res.multiHandLandmarks || [];
+
+  // 只要出现两只手（lm.length>=2），就稳定分配 L/R 角色，不再依赖 label 抖动
+  if(lm.length >= 2){
+    const asg = assignByContinuity([lm[0], lm[1]]);
+    if(asg){
+      missBoth = 0;
+
+      // ✅ 这里保持你原来的逻辑：processFrame(leftLm,rightLm)
+      processFrame(asg.L, asg.R);
+
+      const haveSight = (aimX!=null && aimY!=null);
+      updateLockState(true,true, haveSight);
+
+      // ✅ 关键：如果刚切入双手但 aim 还没算出来，先别闪提示
+      // 我们认为“双手在”时也应该画瞄准镜：用上一帧 aim 继续显示
+      // （aimX/aimY 不清空，就不会出现“字没了但没镜”的怪状态）
+      render(true,true, haveSight);
+      return;
+    }
+  }
+
+  // ====== 没有双手（或无法分配） ======
+  missBoth++;
+
+  // 宽限期内：不清空 aim（防闪）
+  const inGrace = (missBoth <= MISS_TOL);
+
+  // 只有超过宽限期才真正清空
+  if(!inGrace){
+    aimX = aimY = null;
+    lastLW = lastRW = null; // 长时间丢失，重置跟踪
+    isPinched = false;
+    triggerLocked = false;
+    pinchOnCount = pinchOffCount = 0;
+    pinchDistanceHistory = [];
+  }
+
+  // 这里对 updateLockState / render 的 haveSight 也用“宽限后的 aim”来决定
+  const haveSight = (aimX!=null && aimY!=null);
+  updateLockState(false,false, haveSight);
+  render(false,false, haveSight);
+});
+
 
         processFrame(lm[lIdx], lm[rIdx]);
 
