@@ -1076,6 +1076,7 @@ function showTenTitle(sum){
     }
 
     function fire(isCalibrationShot){
+      if (celebration.classList.contains('show')) return;
       const now = Date.now();
       if(now - lastShotTs < SHOT_COOLDOWN_MS) return;
       if(aimX==null) return;
