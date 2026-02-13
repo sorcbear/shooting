@@ -123,14 +123,12 @@
     #celebration .title{
       font:900 56px/1.1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       letter-spacing:0.5px;
-      margin-bottom:28px;   /* ✅ 间距更远（原来14px） */
+      margin-bottom:28px;
     }
-
     #celebration .subtitle{
-      font:800 34px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; /* ✅ 更大（原来22px） */
+      font:800 34px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       opacity:0.92;
     }
-
 
     /* 分享预览层（白底黑字，横屏不裁按钮） */
     #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
@@ -222,37 +220,33 @@
       }
     }
 
-    /* ✅ 开始页：纯白背景 + 上图下按钮 */
+    /* ✅ 开始页：把 start-guide.png 直接当背景，按钮叠在图片上（两手之间） */
     #startGate{
       position:absolute; inset:0; z-index:30;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:space-between;
-      background:#fff; /* ✅ 纯白 */
-      padding:18px;
+      display:block;                 /* ✅ 不再用上下布局 */
+      background:#fff;
       padding-top:calc(6px + env(safe-area-inset-top));
       padding-bottom:calc(20px + env(safe-area-inset-bottom));
       box-sizing:border-box;
+
+      /* ✅ bg 图当背景：居中、等比完整显示（不裁切） */
+      background-image:url("start-guide.png");
+      background-repeat:no-repeat;
+      background-position:center;
+      background-size:contain;
     }
 
-    #gateImgWrap{
-      width:min(920px, 96vw);
-      flex:1 1 auto;
-      min-height:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-    }
-    #gateImg{
-      display:block;
-      width:100%;
-      height:auto;
-      max-height:100%;
-      object-fit:contain;
-    }
+    /* ✅ 原来的 img 结构保留但不显示（避免你其他地方依赖 DOM） */
+    #gateImgWrap{ display:none; }
+    #gateImg{ display:none; }
 
+    /* ✅ 按钮叠加到图片上：默认放在两手之间（可微调 top 值） */
     #gateBtn{
+      position:absolute;
+      left:50%;
+      top:72%;                      /* ✅ 两手之间位置（需要更高就改成 68% / 70%） */
+      transform:translate(-50%,-50%);
+
       width:240px;
       height:60px;
       border-radius:0;
@@ -272,7 +266,7 @@
       -webkit-user-select:none;
       -webkit-tap-highlight-color:transparent;
       touch-action:manipulation;
-      flex:0 0 auto;
+      z-index:31;                   /* ✅ 确保压在背景图之上 */
     }
     #gateBtn .line1{
       font-weight:900;
@@ -324,12 +318,13 @@
         </div>
       </div>
 
-      <!-- ✅ 纯白背景，上面放图，下面按钮 -->
+      <!-- ✅ 开始页：背景图 + 叠加按钮（按钮文字不改） -->
       <div id="startGate">
+        <!-- 保留原 DOM，但已在 CSS 隐藏 -->
         <div id="gateImgWrap">
-          <!-- 把你发的图保存为 start-guide.png 放在同目录 -->
           <img id="gateImg" src="start-guide.png" alt="左手瞄准，右手击发" />
         </div>
+
         <button id="gateBtn">
           <div class="line1">开始射击</div>
           <div class="line2">可开启声音，建议横屏</div>
