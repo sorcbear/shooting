@@ -403,13 +403,16 @@
       if(isiPad) return false;
       return shortCss < 520;
     }
+    function isLandscape(){
+      return rectW > rectH;
+    }
 
     // Aim
     let aimX=null, aimY=null;
     let followAlpha = 0.97;
     let sensitivity = 2.4;
 
-    // ✅ 扳机指示（只用于显示，不影响任何逻辑/文案）
+    // ✅ 扳机指示（只用于显示）
     let trigX = null, trigY = null;
     let trigFollowAlpha = 0.45;
 
@@ -463,7 +466,6 @@
       return videoReady;
     }
 
-    // ✅ 稳定启动：等待 video 真正 ready（不改任何射击/计分逻辑）
     function waitVideoReady(timeoutMs=9000){
       return new Promise((resolve, reject)=>{
         const t0 = Date.now();
@@ -651,28 +653,75 @@
       ctx.restore();
     }
 
-    /* ✅ 说明文字：移到正方形上方 + 更大 */
-    function drawTopMessage(lines){
+    // ✅ 提示文字：全部移到正方形下面（并做“防闪烁”稳定）
+    let overlayMsg = '';
+    let overlayWanted = '';
+    let overlayStable = 0;
+    const OVERLAY_STABLE_FRAMES = 6;
+
+    function wantOverlayMessage(haveLeft, haveRight, haveSight){
+      if(!videoReady) return '等待摄像头画面…';
+
+      // ✅ 校准前：文字永不消失（即使双手都在也显示“锁定/校准”提示）
+      if(!firstShotDone){
+        if(!haveLeft || !haveRight || !haveSight){
+          return '双手距离屏幕50cm以上\n移动位置，直到屏幕上出现瞄准器';
+        }
+        if(!lockReady) return '请对准靶心保持一下';
+        return '已锁定 ✅\n捏合击发校准';
+      }
+
+      // ✅ 校准后：双手都在监控中 -> 不显示；缺任一只手/瞄准器 -> 再出现
+      if(!haveLeft || !haveRight || !haveSight){
+        return '双手距离屏幕50cm以上\n移动位置，直到屏幕上出现瞄准器';
+      }
+      return '';
+    }
+
+    function updateOverlayStable(haveLeft, haveRight, haveSight){
+      const wanted = wantOverlayMessage(haveLeft, haveRight, haveSight);
+
+      if(wanted === overlayWanted){
+        overlayStable++;
+      }else{
+        overlayWanted = wanted;
+        overlayStable = 0;
+      }
+
+      if(overlayStable >= OVERLAY_STABLE_FRAMES){
+        overlayMsg = overlayWanted;
+      }
+
+      // ✅ 保险：校准前永不空
+      if(!firstShotDone && overlayMsg === ''){
+        overlayMsg = '双手距离屏幕50cm以上\n移动位置，直到屏幕上出现瞄准器';
+      }
+    }
+
+    function drawBottomMessage(lines){
       const half = targetSquareHalf * DPR;
 
-      // 顶部安全区 & 正方形上沿
-      const safeTop = 14*DPR + (12*DPR);
-      const maxY = (cy - half) - 10*DPR; // 正方形上方 10px
-      if(maxY <= safeTop) return;
+      const safeBottom = 14*DPR + (12*DPR) + (envSafeBottomPx());
+      const minY = (cy + half) + 10*DPR;             // 正方形下方 10px
+      const maxY = H - safeBottom;                   // 画面底部安全区
+      if(maxY <= minY) return;
 
-      // 可用区域
-      const areaH = Math.max(1, maxY - safeTop);
+      const areaH = Math.max(1, maxY - minY);
       const maxW = Math.max(1, W - 24*DPR);
 
-      // 初始字号（比之前小一点，更稳）
-      let fontPx = Math.min(52*DPR, Math.max(26*DPR, Math.round((2*half) * 0.18)));
+      const phone = isIPhoneLike();
+      const land = isLandscape();
+
+      // ✅ iPhone 横屏：最小字号抬高，避免“字特别小”
+      const minFont = (phone && land) ? (32*DPR) : (26*DPR);
+      const maxFont = Math.min(58*DPR, Math.round((2*half) * 0.20));
+      let fontPx = Math.max(minFont, Math.min(maxFont, Math.round((2*half) * 0.18)));
       let lineH  = fontPx * 1.18;
 
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      // 反复缩放，直到宽/高都放得下
       for(let iter=0; iter<18; iter++){
         ctx.font = `900 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
 
@@ -685,22 +734,19 @@
         const bw = Math.min(maxW, maxTextW + padX*2);
         const bh = lines.length*lineH + padY*2;
 
-        // 宽或高超了就继续缩小
         if((maxTextW + padX*2) > maxW || bh > areaH){
           fontPx *= 0.90;
           lineH = fontPx * 1.18;
           continue;
         }
 
-        // 计算摆放位置：在 safeTop~maxY 中垂直居中
         const bx = cx - bw/2;
-        const by = safeTop + (areaH - bh)/2;
+        const by = minY + (areaH - bh)/2;
 
-        // ✅ 白底提示块（不要任何灰色边框）
+        // ✅ 纯白底，无灰色边框
         ctx.fillStyle = 'rgba(255,255,255,0.94)';
         ctx.fillRect(bx, by, bw, bh);
 
-        // 画字
         ctx.fillStyle = '#000';
         for(let i=0;i<lines.length;i++){
           const yy = by + padY + lineH/2 + i*lineH;
@@ -710,28 +756,18 @@
         return;
       }
 
-      // 兜底：如果实在放不下，就不画（避免超出屏幕）
       ctx.restore();
     }
 
+    function envSafeBottomPx(){
+      // canvas 里拿不到 env(safe-area-inset-bottom)，做个保守值：iPhone 横屏稍微加一点
+      return (isIPhoneLike() && isLandscape()) ? (8*DPR) : 0;
+    }
+
     function drawGuideOverlay(haveLeft, haveRight, haveSight){
-      let msg = '';
-
-      if(!videoReady){
-        msg = '等待摄像头画面…';
-      }else if(!haveLeft || !haveRight || !haveSight){
-        // ✅ 按你要求：两行，放在正方形上方
-        msg = '双手距离屏幕50cm以上\n移动位置，直到屏幕上出现瞄准器';
-      }else if(!firstShotDone){
-        if(!lockReady) msg = '请对准靶心保持一下';
-        else msg = '已锁定 ✅\n捏合击发校准';
-      }else{
-        msg = '';
-      }
-
-      if(!msg) return;
-      const lines = msg.split('\n');
-      drawTopMessage(lines);
+      updateOverlayStable(haveLeft, haveRight, haveSight);
+      if(!overlayMsg) return;
+      drawBottomMessage(overlayMsg.split('\n'));
     }
 
     function render(haveLeft, haveRight, haveSight){
@@ -751,7 +787,7 @@
     }
 
     // ============================================================
-    // ✅【声音系统】更“爆炸/砰”：低频 thump + 大噪声爆裂 + 尾音
+    // ✅【声音系统】不改
     // ============================================================
     let audioCtx = null;
     let audioEnabled = false;
@@ -760,7 +796,6 @@
     let compressor = null;
     let limiter = null;
 
-    // 轻微 slapback（让“砰”更厚一点）
     let slapDelay = null;
     let slapFB = null;
     let slapMix = null;
@@ -790,7 +825,6 @@
       limiter.attack.setValueAtTime(0.001, audioCtx.currentTime);
       limiter.release.setValueAtTime(0.08, audioCtx.currentTime);
 
-      // slapback：极轻
       slapDelay = audioCtx.createDelay(0.10);
       slapDelay.delayTime.setValueAtTime(0.030, audioCtx.currentTime);
       slapFB = audioCtx.createGain();
@@ -818,7 +852,6 @@
       if(ctx.state === 'suspended') await ctx.resume();
       audioEnabled = true;
 
-      // iOS 输出挂载小脉冲
       try{
         const t = ctx.currentTime;
         const o = ctx.createOscillator();
@@ -1078,7 +1111,6 @@
         firstShotDone = true;
         mode = MODE.PLAY;
 
-        // ✅ 摄像头本来就隐藏了，这里不需要再切换；但保留逻辑不动
         video.style.opacity = '0';
         video.style.pointerEvents = 'none';
 
@@ -1098,9 +1130,66 @@
     // MediaPipe
     function getHandIndexByLabel(hdList, label){
       for(let i=0;i<hdList.length;i++){
-        if((hdList[i]?.label || hdList[i]?.classification?.[0]?.label) === label) return i;
+        const lab = (hdList[i]?.label || hdList[i]?.classification?.[0]?.label);
+        if(lab === label) return i;
       }
       return -1;
+    }
+
+    // ✅ 更鲁棒：handedness 缺失/错乱时，也能稳定拿到两只手（避免“检测不到2只手”）
+    function assignHands(lm, hd){
+      const out = { haveLeft:false, haveRight:false, leftLm:null, rightLm:null };
+
+      if(!lm || lm.length === 0) return out;
+
+      const lIdx0 = getHandIndexByLabel(hd||[], 'Left');
+      const rIdx0 = getHandIndexByLabel(hd||[], 'Right');
+
+      // 1) 两个标签都在：按标签
+      if(lm.length >= 2 && lIdx0 !== -1 && rIdx0 !== -1){
+        out.haveLeft = true; out.haveRight = true;
+        out.leftLm = lm[lIdx0];
+        out.rightLm = lm[rIdx0];
+        return out;
+      }
+
+      // 2) 只有一个标签：另一个手用剩下的 index 补齐
+      if(lm.length >= 2 && (lIdx0 !== -1 || rIdx0 !== -1)){
+        const known = (lIdx0 !== -1) ? lIdx0 : rIdx0;
+        const other = (known === 0) ? 1 : 0;
+
+        if(lIdx0 !== -1){
+          out.haveLeft = true; out.haveRight = true;
+          out.leftLm = lm[lIdx0];
+          out.rightLm = lm[other];
+          return out;
+        }else{
+          out.haveLeft = true; out.haveRight = true;
+          out.rightLm = lm[rIdx0];
+          out.leftLm = lm[other];
+          return out;
+        }
+      }
+
+      // 3) 无标签/不可信：用 wrist.x 推断（selfie 下常见：用户右手在画面左侧）
+      if(lm.length >= 2){
+        const wx0 = lm[0]?.[0]?.x ?? 0.5;
+        const wx1 = lm[1]?.[0]?.x ?? 0.5;
+
+        // ✅ 约定：画面更靠左(wrist.x更小) -> 作为“右手(瞄准器)”
+        const idxRight = (wx0 < wx1) ? 0 : 1;
+        const idxLeft  = (idxRight === 0) ? 1 : 0;
+
+        out.haveLeft = true; out.haveRight = true;
+        out.leftLm = lm[idxLeft];
+        out.rightLm = lm[idxRight];
+        return out;
+      }
+
+      // 4) 只检测到一只手：尽量不崩（当作“右手”来生成瞄准器也可，但你逻辑要求双手，所以这里只回传单手）
+      out.haveRight = true;
+      out.rightLm = lm[0];
+      return out;
     }
 
     function processFrame(leftLm, rightLm){
@@ -1108,6 +1197,7 @@
       if(now < freezeUntil) return;
       if(!videoReady) return;
 
+      // 瞄准器：右手食指
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
@@ -1117,7 +1207,7 @@
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
-      // ✅ 扳机手位置：用左手食指指尖做显示定位（不参与任何触发/锁定/计分）
+      // ✅ 扳机手图标：左手食指（仅显示，不参与任何触发/锁定/计分）
       const lTipForUI = leftLm[8];
       const trigP = mapToScreen(lTipForUI.x, lTipForUI.y);
       if(trigX==null){ trigX = trigP.px; trigY = trigP.py; }
@@ -1126,6 +1216,7 @@
         trigY = ema(trigY, trigP.py, trigFollowAlpha);
       }
 
+      // 捏合：左手拇指/食指
       const lThumb = leftLm[4];
       const lIndex = leftLm[8];
       const wrist  = leftLm[0];
@@ -1224,7 +1315,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
           statusEl.textContent = '等待双手...';
         }
 
-        // ✅ 以前这里会把视频显示出来；现在前端始终不显示摄像头画面
         if(!firstShotDone){
           video.style.opacity = '0';
           video.style.pointerEvents = 'none';
@@ -1260,7 +1350,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
     // Init
     let hands=null, camera=null;
 
-    // ✅ 只在点击开始后做一次 play（避免 iPad 偶发卡死在 play 的 await）
     let triedPlayOnce = false;
     async function tryPlayOnceInGesture(){
       if(triedPlayOnce) return;
@@ -1293,15 +1382,14 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
 
         const lm = res.multiHandLandmarks||[];
         const hd = res.multiHandedness||[];
-        const lIdx = getHandIndexByLabel(hd, 'Left');
-        const rIdx = getHandIndexByLabel(hd, 'Right');
 
-        const haveLeft = (lIdx!==-1 && lm[lIdx]);
-        const haveRight = (rIdx!==-1 && lm[rIdx]);
+        const asg = assignHands(lm, hd);
+        const haveLeft = asg.haveLeft && asg.leftLm;
+        const haveRight = asg.haveRight && asg.rightLm;
 
         if(!haveLeft || !haveRight){
           aimX = aimY = null;
-          trigX = trigY = null; // ✅ 扳机图标也清空，避免残影
+          trigX = trigY = null;
           isPinched = false;
           triggerLocked = false;
           pinchOnCount = pinchOffCount = 0;
@@ -1312,7 +1400,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
           return;
         }
 
-        processFrame(lm[lIdx], lm[rIdx]);
+        processFrame(asg.leftLm, asg.rightLm);
 
         const haveSight = (aimX!=null && aimY!=null);
         updateLockState(true,true, haveSight);
@@ -1322,7 +1410,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       video.addEventListener('loadedmetadata', ()=>{ updateVideoReady(); resizeTwice(); }, {once:false});
       video.addEventListener('playing', ()=>{ updateVideoReady(); }, {once:false});
 
-      // ✅ 前端始终隐藏摄像头画面
       video.style.opacity = '0';
       video.style.pointerEvents = 'none';
 
@@ -1330,6 +1417,11 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       lockReady = false;
       lockFrames = 0;
       mode = MODE.WAIT_BOTH;
+
+      // ✅ 重置稳定提示（避免刚进来闪）
+      overlayMsg = '';
+      overlayWanted = '';
+      overlayStable = 0;
 
       video.style.transform = 'scaleX(-1) translateZ(0)';
 
@@ -1356,7 +1448,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       }
     }
 
-    // ✅ 必须先点击按钮解锁音频，再启动摄像头/游戏
     gateBtn.addEventListener('click', async ()=>{
       gateBtn.disabled = true;
       try{
