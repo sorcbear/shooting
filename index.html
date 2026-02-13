@@ -227,57 +227,77 @@
     }
 
     /* ✅ 开始页：纯白背景 + 上图下按钮 */
-    #startGate{
-      position:absolute; inset:0; z-index:30;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:space-between;
-      background:#fff;
-      padding:18px;
-      padding-top:calc(6px + env(safe-area-inset-top));
-      padding-bottom:calc(20px + env(safe-area-inset-bottom));
-      box-sizing:border-box;
-    }
+/* ✅ 开始页：改成 grid，保证底部按钮永远可见 */
+#startGate{
+  position:absolute; inset:0; z-index:30;
+  display:grid;
+  grid-template-rows: 1fr auto;
+  align-items:stretch;
+  justify-items:center;
 
-    #gateImgWrap{
-      width:min(920px, 96vw);
-      flex:1 1 auto;
-      min-height:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-    }
-    #gateImg{
-      display:block;
-      width:100%;
-      height:auto;
-      max-height:100%;
-      object-fit:contain;
-    }
+  background:#fff;
+  padding:18px;
+  padding-top:calc(6px + env(safe-area-inset-top));
+  padding-bottom:calc(12px + env(safe-area-inset-bottom));
+  box-sizing:border-box;
 
-    #gateBtn{
-      width:240px;
-      height:60px;
-      border-radius:0;
-      border:2px solid #000;
-      background:#fff;
-      color:#000;
-      cursor:pointer;
-      padding:8px 12px;
-      box-sizing:border-box;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      gap:4px;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      user-select:none;
-      -webkit-user-select:none;
-      -webkit-tap-highlight-color:transparent;
-      touch-action:manipulation;
-      flex:0 0 auto;
-    }
+  overflow:hidden; /* 防止被撑出 */
+}
+
+/* 上图区：允许被压缩 */
+#gateImgWrap{
+  width:min(920px, 96vw);
+  min-height:0;           /* ✅ 关键：允许 1fr 区域压缩 */
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;        /* ✅ 关键：图片太高时裁掉，不挤按钮 */
+}
+
+/* 图片：永远不超过上半区高度 */
+#gateImg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:100%;
+  object-fit:contain;
+}
+
+/* 按钮区：固定在第二行 */
+#gateBtn{
+  width:240px;
+  height:60px;
+  border-radius:0;
+  border:2px solid #000;
+  background:#fff;
+  color:#000;
+  cursor:pointer;
+  padding:8px 12px;
+  box-sizing:border-box;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  user-select:none;
+  -webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+
+  margin-top:12px;        /* ✅ 图与按钮间距 */
+}
+
+/* 横屏时略收紧，避免工具栏挤压 */
+@media (orientation: landscape){
+  #startGate{
+    padding:12px;
+    padding-top:calc(4px + env(safe-area-inset-top));
+    padding-bottom:calc(10px + env(safe-area-inset-bottom));
+  }
+  #gateBtn{ height:54px; }
+}
+
     #gateBtn .line1{
       font-weight:900;
       font-size:20px;
