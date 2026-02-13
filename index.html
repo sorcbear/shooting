@@ -75,7 +75,6 @@
       display:none;
     }
 
-    /* 分享按钮（右上角 / 直角 / 黑底白字 / 白色分享箭头） */
     #shareBtn{
       position:absolute; top:16px; right:16px; z-index:6;
       background:#000; color:#fff;
@@ -104,7 +103,6 @@
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M16 8l-4-4-4 4h3v6h2V8h3z'/%3E%3Cpath fill='white' d='M5 14h2v5h10v-5h2v7H5v-7z'/%3E%3C/svg%3E");
     }
 
-    /* 每10发称号全屏展示（黑底白字） */
     #celebration{
       position:absolute; inset:0; z-index:10;
       background:#000; color:#fff;
@@ -130,7 +128,6 @@
       opacity:0.88;
     }
 
-    /* 分享预览层（白底黑字，横屏不裁按钮） */
     #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
     #sharePreview.show{ display:block; }
     #sharePreview .sp-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.55); }
@@ -220,14 +217,13 @@
       }
     }
 
-    /* ✅ 开始页：纯白背景 + 上图下按钮 */
     #startGate{
       position:absolute; inset:0; z-index:30;
       display:flex;
       flex-direction:column;
       align-items:center;
       justify-content:space-between;
-      background:#fff; /* ✅ 纯白 */
+      background:#fff;
       padding:18px;
       padding-top:calc(6px + env(safe-area-inset-top));
       padding-bottom:calc(20px + env(safe-area-inset-bottom));
@@ -322,7 +318,6 @@
         </div>
       </div>
 
-      <!-- ✅ 纯白背景，上面放图，下面按钮 -->
       <div id="startGate">
         <div id="gateImgWrap">
           <img id="gateImg" src="start-guide.png" alt="左手瞄准，右手击发" />
@@ -365,7 +360,6 @@
     const celeTitle = document.getElementById('celeTitle');
     const celeSub = document.getElementById('celeSub');
 
-    // Share preview DOM
     const sharePreview = document.getElementById('sharePreview');
     const spImg = document.getElementById('spImg');
     const spClose = document.getElementById('spClose');
@@ -374,15 +368,12 @@
     let spBlobUrl = null;
     let spDownloadName = '';
 
-    // Start gate DOM
     const startGate = document.getElementById('startGate');
     const gateBtn = document.getElementById('gateBtn');
 
-    // Debug
     const DEBUG_MODE = false;
     if(DEBUG_MODE) debugInfo.style.display = 'block';
 
-    // Modes
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', PLAY:'PLAY' };
     let mode = MODE.WAIT_BOTH;
 
@@ -399,7 +390,7 @@
       return shortCss < 520;
     }
 
-    // Aim
+    // Aim / mapping
     let aimX=null, aimY=null;
     let followAlpha = 0.97;
     let sensitivity = 2.4;
@@ -454,7 +445,6 @@
       return videoReady;
     }
 
-    // ✅ 稳定启动：等待 video 真正 ready（不改任何射击/计分逻辑）
     function waitVideoReady(timeoutMs=9000){
       return new Promise((resolve, reject)=>{
         const t0 = Date.now();
@@ -483,11 +473,11 @@
     let freezeUntil = 0;
     let freezeAimX = null, freezeAimY = null;
 
-    // ✅ 新增：扳机手图标（左手捏合手）的位置 + freeze
+    // Trigger marker state
     let trigX=null, trigY=null;
     let freezeTrigX=null, freezeTrigY=null;
 
-    // Lock for calibration phase ONLY
+    // Lock calibration
     const LOCK_DIST_PX = 38;
     const LOCK_FRAMES_NEED = 24;
     let lockFrames = 0;
@@ -567,13 +557,30 @@
     // Utils
     const ema = (prev,next,a)=> prev + (next-prev)*a;
 
-    function mapToScreen(nx, ny){
-      let x = nx, y = ny;
-      x = 1 - x; // mirror
+    // ✅ 新映射：横向更保守 + clamp，保证识别到就“进屏幕”
+    function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+    function mapToScreenLoose(nx, ny){
+      // 基础镜像（保持你原来的镜像逻辑）
+      let x = 1 - nx;
+      let y = ny;
+
       let px = x * W;
       let py = y * H;
-      px = cx + (px - cx) * sensitivity;
-      py = cy + (py - cy) * sensitivity;
+
+      // ✅ 关键：不要用同一个 sensitivity 全方向拉伸
+      // 横向缩一点，纵向稍微保留（这样两只手横向分开也能同时留在屏幕内）
+      const gainX = Math.max(1.0, sensitivity * 0.72);
+      const gainY = Math.max(1.0, sensitivity * 0.92);
+
+      px = cx + (px - cx) * gainX;
+      py = cy + (py - cy) * gainY;
+
+      // ✅ clamp：只要识别到了，就不会被映射挤出屏幕
+      const margin = Math.max(10*DPR, 0.16 * sight_outer_r * DPR);
+      px = clamp(px, margin, W - margin);
+      py = clamp(py, margin, H - margin);
+
       return {px,py};
     }
 
@@ -616,19 +623,20 @@
       ctx.stroke();
     }
 
-    // ✅ 新增：扳机手小图标（简单黑白扳机造型）
+    // ✅ 扳机图标：做大到接近瞄准镜尺寸
     function drawTriggerMarker(x,y){
-      const s = 44 * DPR;
-      const r = 10 * DPR;
+      // 尺寸接近瞄准镜（外径稍小一点，避免遮挡太狠）
+      const s = 210 * DPR;      // ✅ 放大（原来 44）
+      const r = 26 * DPR;
       const w = s, h = s;
 
       ctx.save();
       ctx.translate(x, y);
 
-      // 白底黑边小方块
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      // 半透明白底 + 黑边
+      ctx.fillStyle = 'rgba(255,255,255,0.78)';
       ctx.strokeStyle = '#000';
-      ctx.lineWidth = 3 * DPR;
+      ctx.lineWidth = 5 * DPR;
 
       const bx = -w/2, by = -h/2;
       ctx.beginPath();
@@ -645,26 +653,34 @@
       ctx.fill();
       ctx.stroke();
 
-      // 上方“枪身”
+      // 枪身（更粗）
       ctx.fillStyle = '#000';
-      ctx.fillRect(-w*0.22, -h*0.22, w*0.44, h*0.16);
-      // 前端短管
-      ctx.fillRect(w*0.20, -h*0.19, w*0.18, h*0.08);
+      ctx.fillRect(-w*0.26, -h*0.24, w*0.52, h*0.18);
 
-      // 扳机护圈 + 扳机
+      // 枪管
+      ctx.fillRect(w*0.20, -h*0.20, w*0.22, h*0.10);
+
+      // 扳机护圈
       ctx.strokeStyle = '#000';
-      ctx.lineWidth = 3 * DPR;
+      ctx.lineWidth = 5 * DPR;
       ctx.beginPath();
-      ctx.arc(w*0.02, h*0.06, w*0.13, Math.PI*1.1, Math.PI*1.95);
+      ctx.arc(w*0.02, h*0.06, w*0.16, Math.PI*1.1, Math.PI*1.95);
       ctx.stroke();
 
+      // 扳机
       ctx.fillStyle = '#000';
       ctx.beginPath();
-      ctx.moveTo(-w*0.02, 0);
-      ctx.lineTo(w*0.10, 0);
-      ctx.lineTo(w*0.03, h*0.20);
-      ctx.lineTo(-w*0.14, h*0.20);
+      ctx.moveTo(-w*0.03, 0);
+      ctx.lineTo(w*0.12, 0);
+      ctx.lineTo(w*0.04, h*0.26);
+      ctx.lineTo(-w*0.18, h*0.26);
       ctx.closePath();
+      ctx.fill();
+
+      // 视觉对齐用的小“准星点”（可选：增强对比）
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.arc(0, 0, 3.5*DPR, 0, Math.PI*2);
       ctx.fill();
 
       ctx.restore();
@@ -735,12 +751,10 @@
 
       const now = Date.now();
 
-      // ✅ 右手瞄准镜
       const fx = (now < freezeUntil && freezeAimX!=null) ? freezeAimX : aimX;
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(haveSight && fx!=null && fy!=null) drawSight(fx, fy);
 
-      // ✅ 左手扳机标记（不影响提示语）
       const tx = (now < freezeUntil && freezeTrigX!=null) ? freezeTrigX : trigX;
       const ty = (now < freezeUntil && freezeTrigY!=null) ? freezeTrigY : trigY;
       if(haveLeft && tx!=null && ty!=null) drawTriggerMarker(tx, ty);
@@ -748,9 +762,7 @@
       drawGuideOverlay(haveLeft, haveRight, haveSight);
     }
 
-    // ============================================================
-    // ✅【声音系统】更“爆炸/砰”：低频 thump + 大噪声爆裂 + 尾音
-    // ============================================================
+    // ====== 声音系统（原样保留） ======
     let audioCtx = null;
     let audioEnabled = false;
 
@@ -758,7 +770,6 @@
     let compressor = null;
     let limiter = null;
 
-    // 轻微 slapback（让“砰”更厚一点）
     let slapDelay = null;
     let slapFB = null;
     let slapMix = null;
@@ -906,7 +917,6 @@
       }catch{}
     }
 
-    // Share preview open/close
     function openSharePreview(blob){
       if(spBlobUrl){
         URL.revokeObjectURL(spBlobUrl);
@@ -1063,7 +1073,7 @@
 
       lastShotTs = now;
       freezeAimX = aimX; freezeAimY = aimY;
-      freezeTrigX = trigX; freezeTrigY = trigY; // ✅ 新增：扳机图标也一起 freeze
+      freezeTrigX = trigX; freezeTrigY = trigY;
       freezeUntil = now + FREEZE_MS;
 
       flashEl.style.opacity='1';
@@ -1099,16 +1109,15 @@
       return -1;
     }
 
-    // ✅ 改造：允许 leftLm / rightLm 任意为 null；同时更新两个图标
     function processFrame(leftLm, rightLm){
       const now = Date.now();
       if(now < freezeUntil) return;
       if(!videoReady) return;
 
-      // ===== 右手：瞄准镜（照旧）
+      // 右手：瞄准镜（用新映射：更容易进屏幕）
       if(rightLm){
         const rTip = rightLm[8];
-        const aimP = mapToScreen(rTip.x, rTip.y);
+        const aimP = mapToScreenLoose(rTip.x, rTip.y);
 
         if(aimX==null){ aimX=aimP.px; aimY=aimP.py; }
         else{
@@ -1117,18 +1126,18 @@
         }
       }
 
-      // ===== 左手：扳机标记（拇指+食指中点）
+      // 左手：扳机标记（拇指+食指中点，用同样的“更容易进屏幕”的映射）
       if(leftLm){
         const lThumb = leftLm[4];
         const lIndex = leftLm[8];
         const midx = (lThumb.x + lIndex.x) * 0.5;
         const midy = (lThumb.y + lIndex.y) * 0.5;
-        const tP = mapToScreen(midx, midy);
+        const tP = mapToScreenLoose(midx, midy);
         trigX = tP.px;
         trigY = tP.py;
       }
 
-      // ===== 下面是“捏合击发逻辑”：只在 leftLm 存在时才做
+      // 捏合击发逻辑（保持你原逻辑：只在 leftLm 存在时做）
       if(!leftLm) return;
 
       const lThumb = leftLm[4];
@@ -1265,7 +1274,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
     // Init
     let hands=null, camera=null;
 
-    // ✅ 只在点击开始后做一次 play（避免 iPad 偶发卡死在 play 的 await）
     let triedPlayOnce = false;
     async function tryPlayOnceInGesture(){
       if(triedPlayOnce) return;
@@ -1304,8 +1312,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
         const haveLeft  = (lIdx!==-1 && lm[lIdx]);
         const haveRight = (rIdx!==-1 && lm[rIdx]);
 
-        // ✅ 不再因为缺一只手就把另一只手的图标清空
-        //    只在对应那只手缺失时，清空它自己的状态（避免互相牵连）
         if(!haveRight){
           aimX = aimY = null;
         }
@@ -1317,12 +1323,10 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
           pinchDistanceHistory = [];
         }
 
-        // ✅ 同时处理（允许某只手为 null）
         processFrame(haveLeft ? lm[lIdx] : null, haveRight ? lm[rIdx] : null);
 
         const haveSight = (aimX!=null && aimY!=null);
         updateLockState(!!haveLeft, !!haveRight, haveSight);
-
         render(!!haveLeft, !!haveRight, haveSight);
       });
 
@@ -1353,14 +1357,9 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       await waitVideoReady(9000).catch(()=>{});
       updateVideoReady();
 
-      if(videoReady){
-        statusEl.textContent = '等待双手...';
-      }else{
-        statusEl.textContent = '等待摄像头画面…';
-      }
+      statusEl.textContent = videoReady ? '等待双手...' : '等待摄像头画面…';
     }
 
-    // ✅ 必须先点击按钮解锁音频，再启动摄像头/游戏
     gateBtn.addEventListener('click', async ()=>{
       gateBtn.disabled = true;
       try{
@@ -1380,7 +1379,6 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       });
     });
 
-    // 初始态
     render(false,false,false);
     statusEl.textContent = '准备开始';
   </script>
