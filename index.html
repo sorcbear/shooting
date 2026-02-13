@@ -1004,11 +1004,20 @@ function showTenTitle(sum){
           shareCtx.fillText(`最高单发: ${maxScore.toFixed(1)}`, 150, y);
         }
 
-        shareCtx.fillStyle = '#999';
-        shareCtx.font = '24px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-        shareCtx.textAlign = 'center';
-        const now = new Date();
-        shareCtx.fillText(now.toLocaleDateString('zh-CN'), width/2, height-40);
+// 时间（下移 + 纯白）
+          shareCtx.fillStyle = '#ffffff';   // 纯白色
+          shareCtx.font = '28px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+          shareCtx.textAlign = 'center';
+
+          const now = new Date();
+
+// 下移到更靠近底部（原来是 height-40）
+          shareCtx.fillText(
+            now.toLocaleDateString('zh-CN'),
+            width/2,
+            height - 20    // ← 数值越小越靠下
+          );
+
 
         shareCanvas.toBlob((blob)=>{
           if(!blob){ alert('生成图片失败'); return; }
