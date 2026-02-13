@@ -574,6 +574,115 @@
       return {px,py};
     }
 
+    // ============================================================
+    // ✅ 新增：击发手位置符号（只做可视化，不改任何识别/射击原则）
+    // - 只要识别到“捏合射击那只手”（当前代码里用于捏合的是 Left 手），就显示
+    // - 映射做“非等距”（非线性）比例：左右/上下用幂指数曲线压缩/扩展
+    // ============================================================
+    let trigX = null, trigY = null;         // 击发手符号位置（屏幕像素）
+    let trigFollowAlpha = 0.92;             // 单独的平滑（不影响 aim 的平滑）
+    const TRIG_GAMMA_X = 0.78;              // ✅ 非等距：x 方向非线性（<1 更“拉开”边缘）
+    const TRIG_GAMMA_Y = 0.85;              // ✅ 非等距：y 方向非线性
+    let trigSensitivity = 1.65;             // ✅ 独立灵敏度（按屏幕比例调）
+
+    function tuneTriggerByDevice(){
+      // 不影响原来的 tuneAimByDevice；这里单独调一个可视化 gain
+      const REF_SHORT = 390;
+      const phone = isIPhoneLike();
+      const base = phone ? 1.85 : 1.55;
+      let g = base * (REF_SHORT / Math.max(1, shortCss));
+      trigSensitivity = Math.min(4.5, Math.max(1.0, g));
+      trigFollowAlpha = phone ? 0.96 : 0.92;
+    }
+
+    // resize 时顺带调一下（只影响符号位置显示）
+    const _resizeOrig = resize;
+    resize = function(){
+      _resizeOrig();
+      tuneTriggerByDevice();
+    };
+
+    function warp01(u, gamma){
+      // u in [0,1] -> 非线性映射（中间更密/边缘更疏，达到“非等距”）
+      // 使用以 0.5 为中心的幂曲线：0.5 +/- |d|^gamma
+      const d = u - 0.5;
+      const s = d < 0 ? -1 : 1;
+      const a = Math.pow(Math.abs(d) * 2, gamma) / 2; // 归一化再压幂
+      return 0.5 + s * a;
+    }
+
+    function mapToScreenNonLinear(nx, ny, gammaX, gammaY, gain){
+      // mirror 以保持与视频视觉一致
+      let x = 1 - nx;
+      let y = ny;
+
+      // 非线性 warp（非等距）
+      x = warp01(x, gammaX);
+      y = warp01(y, gammaY);
+
+      let px = x * W;
+      let py = y * H;
+
+      // 与瞄准类似的“绕中心缩放”，但用独立 gain（只用于符号显示）
+      px = cx + (px - cx) * gain;
+      py = cy + (py - cy) * gain;
+
+      return {px, py};
+    }
+
+    function drawTriggerIcon(x, y){
+      // 黑白“扳机”样式的小图标（只画在 canvas 上）
+      const s = 26 * DPR;          // 图标整体尺寸基准
+      const w = 38 * DPR;
+      const h = 26 * DPR;
+      const r = 5 * DPR;
+
+      ctx.save();
+      ctx.translate(x, y);
+
+      // 外框（白底黑边）
+      ctx.lineWidth = 3 * DPR;
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.strokeStyle = '#000';
+
+      // 圆角矩形
+      ctx.beginPath();
+      const x0 = -w/2, y0 = -h/2;
+      ctx.moveTo(x0+r, y0);
+      ctx.arcTo(x0+w, y0, x0+w, y0+h, r);
+      ctx.arcTo(x0+w, y0+h, x0, y0+h, r);
+      ctx.arcTo(x0, y0+h, x0, y0, r);
+      ctx.arcTo(x0, y0, x0+w, y0, r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // 扳机轮廓（黑白对比）
+      ctx.fillStyle = '#000';
+      // 枪体上条
+      ctx.fillRect(-w*0.30, -h*0.15, w*0.52, h*0.12);
+      // 机匣
+      ctx.fillRect(-w*0.30, -h*0.03, w*0.32, h*0.20);
+
+      // 扳机弧（白内黑边）
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2.5 * DPR;
+      ctx.beginPath();
+      ctx.arc(-w*0.12, h*0.09, h*0.22, Math.PI*1.05, Math.PI*1.95);
+      ctx.stroke();
+
+      // 小“触发点”（黑白圈）
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(w*0.22, 0, 4.5*DPR, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2*DPR;
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
     // Draw
     function drawTarget(){
       ctx.fillStyle = '#fff';
@@ -680,6 +789,11 @@
       const fx = (now < freezeUntil && freezeAimX!=null) ? freezeAimX : aimX;
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
+
+      // ✅ 新增：只要识别到“捏合射击的手”（Left 手存在），就显示扳机符号
+      if(haveLeft && trigX!=null && trigY!=null){
+        drawTriggerIcon(trigX, trigY);
+      }
 
       drawGuideOverlay(haveLeft, haveRight, haveSight);
     }
@@ -973,9 +1087,9 @@
     let lastShotTs = 0;
 
     const PINCH_DISTANCE_ON  = 0.20;
-    const PINCH_DISTANCE_OFF = 0.26;
+    const PINCH_DISTANCE_OFF = 0.28;
 
-    const PINCH_ON_FRAMES  = 2;
+    const PINCH_ON_FRAMES  = 3;
     const PINCH_OFF_FRAMES = 3;
     let pinchOnCount = 0;
     let pinchOffCount = 0;
@@ -993,6 +1107,7 @@
       if(pinchDistanceHistory.length === 0) return 999;
       return pinchDistanceHistory.reduce((a,b)=>a+b,0) / pinchDistanceHistory.length;
     }
+
     function distance3D(p1, p2){
       const dx = p1.x - p2.x;
       const dy = p1.y - p2.y;
@@ -1047,6 +1162,7 @@
       if(now < freezeUntil) return;
       if(!videoReady) return;
 
+      // ====== 右手：瞄准（原逻辑不变）======
       const rTip = rightLm[8];
       const aimP = mapToScreen(rTip.x, rTip.y);
 
@@ -1056,6 +1172,17 @@
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
+      // ====== ✅ 左手：新增“击发手位置符号”（只显示，不改触发原则）======
+      // 选择 Left 手的食指指尖作为位置代表（你也可换成 wrist/掌心，这里不影响捏合判定）
+      const lTipForIcon = leftLm[8];
+      const trigP = mapToScreenNonLinear(lTipForIcon.x, lTipForIcon.y, TRIG_GAMMA_X, TRIG_GAMMA_Y, trigSensitivity);
+      if(trigX==null){ trigX = trigP.px; trigY = trigP.py; }
+      else{
+        trigX = ema(trigX, trigP.px, trigFollowAlpha);
+        trigY = ema(trigY, trigP.py, trigFollowAlpha);
+      }
+
+      // ====== 左手：捏合判定（原逻辑不变）======
       const lThumb = leftLm[4];
       const lIndex = leftLm[8];
       const wrist  = leftLm[0];
@@ -1079,7 +1206,7 @@ triggerLocked: ${triggerLocked}
 videoReady: ${videoReady}
 readyState: ${video.readyState}
 vw/vh: ${video.videoWidth}x${video.videoHeight}
-        `.trim();
+`.trim();
       }
 
       if(!firstShotDone && !lockReady){
@@ -1145,6 +1272,10 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       if(!haveLeft || !haveRight || !haveSight){
         lockFrames = 0;
         lockReady = false;
+
+        // ✅ 新增符号显示变量清理（只影响符号，不影响射击原则）
+        // 目的：没有 left 时不显示旧位置；不改任何捏合/射击逻辑
+        trigX = trigY = null;
 
         if(firstShotDone){
           mode = MODE.PLAY;
@@ -1235,6 +1366,9 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
           pinchOnCount = pinchOffCount = 0;
           pinchDistanceHistory = [];
 
+          // ✅ 新增符号：若缺少 Left，则符号也消失（只显示层面）
+          if(!haveLeft) trigX = trigY = null;
+
           updateLockState(!!haveLeft, !!haveRight, false);
           render(!!haveLeft, !!haveRight, false);
           return;
@@ -1256,6 +1390,9 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
       lockReady = false;
       lockFrames = 0;
       mode = MODE.WAIT_BOTH;
+
+      // ✅ 新增符号状态初始化（不影响触发）
+      trigX = trigY = null;
 
       video.style.transform = 'scaleX(-1) translateZ(0)';
 
