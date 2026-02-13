@@ -1327,13 +1327,20 @@ hands.onResults(res=>{
 
       video.style.transform = 'scaleX(-1) translateZ(0)';
 
-      camera = new Camera(video, {
-        onFrame: async()=>{
-          if(!videoReady) return;
-          await hands.send({image:video});
-        },
-        width:640, height:480, facingMode:'user'
-      });
+camera = new Camera(video, {
+  onFrame: async()=>{
+    // ✅ 不要依赖 videoReady（避免卡死）
+    if(video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) return;
+    try{
+      await hands.send({image: video});
+    }catch(e){
+      // ✅ 极少数情况下 hands 还没准备好，吞掉避免崩
+      // console.error(e);
+    }
+  },
+  width:640, height:480, facingMode:'user'
+});
+
 
       await camera.start();
 
