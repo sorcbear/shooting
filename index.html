@@ -409,6 +409,10 @@
     let followAlpha = 0.97;
     let sensitivity = 2.4;
 
+    // ✅ 扳机指示（只用于显示，不影响任何逻辑/文案）
+    let trigX = null, trigY = null;
+    let trigFollowAlpha = 0.45;
+
     function tuneAimByDevice(){
       const phone = isIPhoneLike();
       followAlpha = phone ? 1 : 1;
@@ -617,90 +621,118 @@
       ctx.stroke();
     }
 
+    // ✅ 扳机黑白线条（只用于显示：代表另一只手的位置）
+    function drawTriggerIcon(x, y){
+      const s = 34 * DPR;
+      const thickW = 10 * DPR;   // 白描边
+      const thickB = 6 * DPR;    // 黑描边
+
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      const x0 = x - s*0.30;
+      const y0 = y - s*0.15;
+
+      function strokePath(w, color){
+        ctx.lineWidth = w;
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0 - s*0.35);
+        ctx.lineTo(x0, y0 + s*0.30);
+        ctx.lineTo(x0 + s*0.45, y0 + s*0.30);
+        ctx.lineTo(x0 + s*0.45, y0 + s*0.50);
+        ctx.stroke();
+      }
+
+      strokePath(thickW, '#fff');
+      strokePath(thickB, '#000');
+
+      ctx.restore();
+    }
+
     /* ✅ 说明文字：移到正方形上方 + 更大 */
-function drawTopMessage(lines){
-  const half = targetSquareHalf * DPR;
+    function drawTopMessage(lines){
+      const half = targetSquareHalf * DPR;
 
-  // 顶部安全区 & 正方形上沿
-  const safeTop = 14*DPR + (12*DPR);
-  const maxY = (cy - half) - 10*DPR; // 正方形上方 10px
-  if(maxY <= safeTop) return;
+      // 顶部安全区 & 正方形上沿
+      const safeTop = 14*DPR + (12*DPR);
+      const maxY = (cy - half) - 10*DPR; // 正方形上方 10px
+      if(maxY <= safeTop) return;
 
-  // 可用区域
-  const areaH = Math.max(1, maxY - safeTop);
-  const maxW = Math.max(1, W - 24*DPR);
+      // 可用区域
+      const areaH = Math.max(1, maxY - safeTop);
+      const maxW = Math.max(1, W - 24*DPR);
 
-  // 初始字号（比之前小一点，更稳）
-  let fontPx = Math.min(52*DPR, Math.max(26*DPR, Math.round((2*half) * 0.18)));
-  let lineH  = fontPx * 1.18;
+      // 初始字号（比之前小一点，更稳）
+      let fontPx = Math.min(52*DPR, Math.max(26*DPR, Math.round((2*half) * 0.18)));
+      let lineH  = fontPx * 1.18;
 
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
 
-  // 反复缩放，直到宽/高都放得下
-  for(let iter=0; iter<18; iter++){
-    ctx.font = `900 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      // 反复缩放，直到宽/高都放得下
+      for(let iter=0; iter<18; iter++){
+        ctx.font = `900 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
 
-    let maxTextW = 0;
-    for(const t of lines) maxTextW = Math.max(maxTextW, ctx.measureText(t).width);
+        let maxTextW = 0;
+        for(const t of lines) maxTextW = Math.max(maxTextW, ctx.measureText(t).width);
 
-    const padX = 14*DPR;
-    const padY = 10*DPR;
+        const padX = 14*DPR;
+        const padY = 10*DPR;
 
-    const bw = Math.min(maxW, maxTextW + padX*2);
-    const bh = lines.length*lineH + padY*2;
+        const bw = Math.min(maxW, maxTextW + padX*2);
+        const bh = lines.length*lineH + padY*2;
 
-    // 宽或高超了就继续缩小
-    if((maxTextW + padX*2) > maxW || bh > areaH){
-      fontPx *= 0.90;
-      lineH = fontPx * 1.18;
-      continue;
+        // 宽或高超了就继续缩小
+        if((maxTextW + padX*2) > maxW || bh > areaH){
+          fontPx *= 0.90;
+          lineH = fontPx * 1.18;
+          continue;
+        }
+
+        // 计算摆放位置：在 safeTop~maxY 中垂直居中
+        const bx = cx - bw/2;
+        const by = safeTop + (areaH - bh)/2;
+
+        // ✅ 白底提示块（不要任何灰色边框）
+        ctx.fillStyle = 'rgba(255,255,255,0.94)';
+        ctx.fillRect(bx, by, bw, bh);
+
+        // 画字
+        ctx.fillStyle = '#000';
+        for(let i=0;i<lines.length;i++){
+          const yy = by + padY + lineH/2 + i*lineH;
+          ctx.fillText(lines[i], cx, yy);
+        }
+        ctx.restore();
+        return;
+      }
+
+      // 兜底：如果实在放不下，就不画（避免超出屏幕）
+      ctx.restore();
     }
 
-    // 计算摆放位置：在 safeTop~maxY 中垂直居中
-    const bx = cx - bw/2;
-    const by = safeTop + (areaH - bh)/2;
+    function drawGuideOverlay(haveLeft, haveRight, haveSight){
+      let msg = '';
 
-    // ✅ 白底提示块（不要任何灰色边框）
-    ctx.fillStyle = 'rgba(255,255,255,0.94)';
-    ctx.fillRect(bx, by, bw, bh);
+      if(!videoReady){
+        msg = '等待摄像头画面…';
+      }else if(!haveLeft || !haveRight || !haveSight){
+        // ✅ 按你要求：两行，放在正方形上方
+        msg = '双手距离屏幕50cm以上\n移动位置，直到屏幕上出现瞄准器';
+      }else if(!firstShotDone){
+        if(!lockReady) msg = '请对准靶心保持一下';
+        else msg = '已锁定 ✅\n捏合击发校准';
+      }else{
+        msg = '';
+      }
 
-    // 画字
-    ctx.fillStyle = '#000';
-    for(let i=0;i<lines.length;i++){
-      const yy = by + padY + lineH/2 + i*lineH;
-      ctx.fillText(lines[i], cx, yy);
+      if(!msg) return;
+      const lines = msg.split('\n');
+      drawTopMessage(lines);
     }
-    ctx.restore();
-    return;
-  }
-
-  // 兜底：如果实在放不下，就不画（避免超出屏幕）
-  ctx.restore();
-}
-
-
-function drawGuideOverlay(haveLeft, haveRight, haveSight){
-  let msg = '';
-
-  if(!videoReady){
-    msg = '等待摄像头画面…';
-  }else if(!haveLeft || !haveRight || !haveSight){
-    // ✅ 按你要求：两行，放在正方形上方
-    msg = '双手距离屏幕50cm以上\n移动位置，直到屏幕上出现瞄准器';
-  }else if(!firstShotDone){
-    if(!lockReady) msg = '请对准靶心保持一下';
-    else msg = '已锁定 ✅\n捏合击发校准';
-  }else{
-    msg = '';
-  }
-
-  if(!msg) return;
-  const lines = msg.split('\n');
-  drawTopMessage(lines);
-}
-
 
     function render(haveLeft, haveRight, haveSight){
       drawTarget();
@@ -709,6 +741,11 @@ function drawGuideOverlay(haveLeft, haveRight, haveSight){
       const fx = (now < freezeUntil && freezeAimX!=null) ? freezeAimX : aimX;
       const fy = (now < freezeUntil && freezeAimY!=null) ? freezeAimY : aimY;
       if(fx!=null) drawSight(fx, fy);
+
+      // ✅ 扳机图标：检测到左手就显示（代表另一只手出现）
+      if(haveLeft && trigX!=null && trigY!=null){
+        drawTriggerIcon(trigX, trigY);
+      }
 
       drawGuideOverlay(haveLeft, haveRight, haveSight);
     }
@@ -1080,6 +1117,15 @@ function drawGuideOverlay(haveLeft, haveRight, haveSight){
         aimY = ema(aimY, aimP.py, followAlpha);
       }
 
+      // ✅ 扳机手位置：用左手食指指尖做显示定位（不参与任何触发/锁定/计分）
+      const lTipForUI = leftLm[8];
+      const trigP = mapToScreen(lTipForUI.x, lTipForUI.y);
+      if(trigX==null){ trigX = trigP.px; trigY = trigP.py; }
+      else{
+        trigX = ema(trigX, trigP.px, trigFollowAlpha);
+        trigY = ema(trigY, trigP.py, trigFollowAlpha);
+      }
+
       const lThumb = leftLm[4];
       const lIndex = leftLm[8];
       const wrist  = leftLm[0];
@@ -1255,6 +1301,7 @@ vw/vh: ${video.videoWidth}x${video.videoHeight}
 
         if(!haveLeft || !haveRight){
           aimX = aimY = null;
+          trigX = trigY = null; // ✅ 扳机图标也清空，避免残影
           isPinched = false;
           triggerLocked = false;
           pinchOnCount = pinchOffCount = 0;
