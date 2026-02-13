@@ -129,6 +129,17 @@
       font:700 22px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       opacity:0.88;
     }
+    /* ✅ 只在“建议截肢”这一档：放大“10发总分 …”并拉开行距/两行距离 */
+    #celebration.harsh .title{
+      margin-bottom: 26px;          /* 两行之间距离更大（原来是14px） */
+    }
+
+    #celebration.harsh .subtitle{
+      font-size: 34px;              /* 原来是 22px */
+      line-height: 1.6;             /* 原来是 1.2 */
+      letter-spacing: 0.3px;
+    }
+
 
     /* 分享预览层（白底黑字，横屏不裁按钮） */
     #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
@@ -524,12 +535,21 @@
     let shotScores = [];
     let lastTenShownEnd = 0;
 
-    function showTenTitle(sum){
-      celeTitle.textContent = titleByTenSum(sum);
-      celeSub.textContent = `10发总分 ${sum.toFixed(1)}`;
-      celebration.classList.add('show');
-      setTimeout(()=>celebration.classList.remove('show'), 5000);
-    }
+function showTenTitle(sum){
+  const t = titleByTenSum(sum);
+  celeTitle.textContent = t;
+  celeSub.textContent = `10发总分 ${sum.toFixed(1)}`;
+
+  // ✅ 只有“建议截肢”这一档，才启用大字/大行距样式
+  celebration.classList.toggle('harsh', t === '建议截肢');
+
+  celebration.classList.add('show');
+  setTimeout(()=>{
+    celebration.classList.remove('show');
+    celebration.classList.remove('harsh'); // 可选：关闭时顺便清掉，避免下一次残留
+  }, 5000);
+}
+
 
     function renderScores(){
       const n = shotScores.length;
