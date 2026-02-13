@@ -302,6 +302,27 @@
 
     /* ✅ 强制：开始页显示时，视频永远不可见（彻底杜绝“闪一下摄像头画面”） */
     body.gate-on #video{ opacity:0 !important; }
+    
+    /* ✅ 校准成功提示（绿色 √ 已校准） */
+    #calOk{
+      display:none;
+      font:800 14px/1.25 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:#1B5E20;
+      background:rgba(46,125,50,.10);
+      border:1px solid rgba(46,125,50,.35);
+      padding:6px 10px;
+      border-radius:999px;
+      align-items:center;
+      gap:6px;
+    }
+    #calOk.show{ display:inline-flex; }
+    #calOk::before{
+      content:"✓";
+      font-weight:900;
+      font-size:16px;
+      line-height:1;
+    }
+
   </style>
 </head>
 
@@ -356,6 +377,7 @@
         <div><span class="muted">左手手掌瞄准 · 右手捏合击发</span></div>
         <span id="status" class="pill">初始化…</span>
         <span class="muted" id="hint"></span>
+        <span id="calOk"></span>
       </div>
       <div id="log"></div>
     </div>
@@ -376,6 +398,8 @@
     const hintEl = document.getElementById('hint');
     const debugInfo = document.getElementById('debugInfo');
     const shareBtn = document.getElementById('shareBtn');
+    const calOkEl = document.getElementById('calOk');
+
 
     const celebration = document.getElementById('celebration');
     const celeTitle = document.getElementById('celeTitle');
@@ -1036,6 +1060,14 @@ function showTenTitle(sum){
 
         statusEl.textContent = '校准完成 ✅ 正式开始';
         hintEl.textContent = '左手"完全捏合"=开枪';
+        // ✅ 新增：显示“√ 已校准”（短暂显示，不影响任何逻辑）
+        if(calOkEl){
+          calOkEl.textContent = '已校准';
+          calOkEl.classList.add('show');
+          clearTimeout(calOkEl._t);
+          calOkEl._t = setTimeout(()=>calOkEl.classList.remove('show'), 1800);
+        }
+
         return;
       }
 
