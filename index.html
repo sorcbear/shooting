@@ -411,12 +411,12 @@
       followAlpha = phone ? 1 : 1;
 
       const REF_SHORT = 390;
-      const baseGainPhone = 9;
+      const baseGainPhone = 10;
       const baseGainPad   = 8;
       const base = phone ? baseGainPhone : baseGainPad;
 
       let gain = base * (REF_SHORT / Math.max(1, shortCss));
-      sensitivity = Math.min(13, Math.max(1.1, gain));
+      sensitivity = Math.min(14, Math.max(1.1, gain));
     }
 
     function resize(){
