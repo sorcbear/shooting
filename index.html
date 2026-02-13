@@ -75,7 +75,6 @@
       display:none;
     }
 
-    /* 分享按钮（右上角 / 直角 / 黑底白字 / 白色分享箭头） */
     #shareBtn{
       position:absolute; top:16px; right:16px; z-index:6;
       background:#000; color:#fff;
@@ -104,7 +103,6 @@
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M16 8l-4-4-4 4h3v6h2V8h3z'/%3E%3Cpath fill='white' d='M5 14h2v5h10v-5h2v7H5v-7z'/%3E%3C/svg%3E");
     }
 
-    /* 每10发称号全屏展示（黑底白字） */
     #celebration{
       position:absolute; inset:0; z-index:10;
       background:#000; color:#fff;
@@ -130,7 +128,6 @@
       opacity:0.88;
     }
 
-    /* 分享预览层（白底黑字，横屏不裁按钮） */
     #sharePreview{ position:absolute; inset:0; z-index:20; display:none; }
     #sharePreview.show{ display:block; }
     #sharePreview .sp-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.55); }
@@ -220,14 +217,13 @@
       }
     }
 
-    /* ✅ 开始页：纯白背景 + 上图下按钮 */
     #startGate{
       position:absolute; inset:0; z-index:30;
       display:flex;
       flex-direction:column;
       align-items:center;
       justify-content:space-between;
-      background:#fff; /* ✅ 纯白 */
+      background:#fff;
       padding:18px;
       padding-top:calc(6px + env(safe-area-inset-top));
       padding-bottom:calc(20px + env(safe-area-inset-bottom));
@@ -254,7 +250,7 @@
       width:240px;
       height:60px;
       border-radius:0;
-      border:2px solid #000;  
+      border:2px solid #000;
       background:#fff;
       color:#000;
       cursor:pointer;
@@ -322,10 +318,8 @@
         </div>
       </div>
 
-      <!-- ✅ 纯白背景，上面放图，下面按钮 -->
       <div id="startGate">
         <div id="gateImgWrap">
-          <!-- 把你发的图保存为 start-guide.png 放在同目录 -->
           <img id="gateImg" src="start-guide.png" alt="左手瞄准，右手击发" />
         </div>
         <button id="gateBtn">
@@ -367,7 +361,6 @@
     const celeTitle = document.getElementById('celeTitle');
     const celeSub = document.getElementById('celeSub');
 
-    // Share preview DOM
     const sharePreview = document.getElementById('sharePreview');
     const spImg = document.getElementById('spImg');
     const spClose = document.getElementById('spClose');
@@ -376,13 +369,17 @@
     let spBlobUrl = null;
     let spDownloadName = '';
 
-    // Start gate DOM
     const startGate = document.getElementById('startGate');
     const gateBtn = document.getElementById('gateBtn');
 
     // Debug
     const DEBUG_MODE = false;
     if(DEBUG_MODE) debugInfo.style.display = 'block';
+
+    // Device
+    const ua = navigator.userAgent || '';
+    const IS_IPAD = /iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua)); // iPadOS
+    const IS_IPHONE = /iPhone/.test(ua);
 
     // Modes
     const MODE = { WAIT_BOTH:'WAIT_BOTH', READY:'READY', PLAY:'PLAY' };
@@ -393,11 +390,8 @@
     let rectW=0, rectH=0, shortCss=0;
 
     function isIPhoneLike(){
-      const ua = navigator.userAgent || '';
-      const isiPhone = /iPhone/.test(ua);
-      const isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua));
-      if(isiPhone) return true;
-      if(isiPad) return false;
+      if(IS_IPHONE) return true;
+      if(IS_IPAD) return false;
       return shortCss < 520;
     }
 
@@ -454,6 +448,43 @@
     function updateVideoReady(){
       videoReady = (video.readyState >= 2) && (video.videoWidth > 0) && (video.videoHeight > 0);
       return videoReady;
+    }
+
+    // ✅ 等待 video 真正开始播放（避免 iPad 偶发卡）
+    function waitVideoPlaying(timeoutMs=6000){
+      return new Promise((resolve, reject)=>{
+        const t0 = Date.now();
+
+        const ok = ()=>{
+          cleanup();
+          updateVideoReady();
+          resolve(true);
+        };
+        const tick = ()=>{
+          updateVideoReady();
+          if(videoReady) { ok(); return; }
+          if(Date.now() - t0 > timeoutMs){
+            cleanup();
+            reject(new Error('VideoStartTimeout'));
+            return;
+          }
+          setTimeout(tick, 80);
+        };
+        const onPlaying = ()=> ok();
+        const onLoaded = ()=> { updateVideoReady(); };
+        const onErr = ()=> { /* 让 tick 自己超时 */ };
+
+        function cleanup(){
+          video.removeEventListener('playing', onPlaying);
+          video.removeEventListener('loadedmetadata', onLoaded);
+          video.removeEventListener('error', onErr);
+        }
+
+        video.addEventListener('playing', onPlaying, {once:true});
+        video.addEventListener('loadedmetadata', onLoaded, {once:false});
+        video.addEventListener('error', onErr, {once:false});
+        tick();
+      });
     }
 
     // State flags
@@ -672,7 +703,7 @@
     }
 
     // ============================================================
-    // ✅【声音系统】更“爆炸/砰”：低频 thump + 大噪声爆裂 + 尾音
+    // ✅【声音系统】(不改)
     // ============================================================
     let audioCtx = null;
     let audioEnabled = false;
@@ -681,7 +712,6 @@
     let compressor = null;
     let limiter = null;
 
-    // 轻微 slapback（让“砰”更厚一点）
     let slapDelay = null;
     let slapFB = null;
     let slapMix = null;
@@ -695,7 +725,6 @@
       audioCtx = new AC();
 
       preGain = audioCtx.createGain();
-      // ✅ 更像爆炸：整体更大一点
       preGain.gain.setValueAtTime(1.55, audioCtx.currentTime);
 
       compressor = audioCtx.createDynamicsCompressor();
@@ -712,7 +741,6 @@
       limiter.attack.setValueAtTime(0.001, audioCtx.currentTime);
       limiter.release.setValueAtTime(0.08, audioCtx.currentTime);
 
-      // slapback：极轻
       slapDelay = audioCtx.createDelay(0.10);
       slapDelay.delayTime.setValueAtTime(0.030, audioCtx.currentTime);
       slapFB = audioCtx.createGain();
@@ -740,7 +768,6 @@
       if(ctx.state === 'suspended') await ctx.resume();
       audioEnabled = true;
 
-      // iOS 输出挂载小脉冲
       try{
         const t = ctx.currentTime;
         const o = ctx.createOscillator();
@@ -761,7 +788,6 @@
       const data = buf.getChannelData(0);
       for(let i=0;i<n;i++){
         const x = i / n;
-        // ✅ 更像“爆”：前 10~20ms 更猛，然后衰减
         const e = Math.pow(1 - x, 2.15);
         const punch = (x < 0.020) ? 2.25 : 1.0;
         data[i] = (Math.random()*2-1) * e * punch;
@@ -769,13 +795,11 @@
       return buf;
     }
 
-    // ✅ 更爆炸的击发音
     function beep(){
       if(!audioEnabled || !audioCtx || !preGain) return;
       const ctx = audioCtx;
       const t0 = ctx.currentTime;
 
-      // 1) 低频 thump（更像“砰”）
       try{
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -790,9 +814,8 @@
         o.stop(t0 + 0.26);
       }catch{}
 
-      // 2) 爆裂主体：噪声 + 低通下扫（更像“轰”）
       try{
-        const dur = 0.32; // ✅ 尾音更长一点点
+        const dur = 0.32;
         const src = ctx.createBufferSource();
         src.buffer = makeNoiseBuffer(dur);
 
@@ -811,7 +834,6 @@
         src.stop(t0 + dur + 0.03);
       }catch{}
 
-      // 3) 高频 crack：带通短促一刀（让“爆”更炸）
       try{
         const dur = 0.08;
         const src = ctx.createBufferSource();
@@ -952,7 +974,7 @@
     shareBtn.addEventListener('click', shareScore);
 
     // ========================================
-    // Pinch system
+    // Pinch system (不改)
     // ========================================
     let isPinched = false;
     let triggerLocked = false;
@@ -1063,6 +1085,9 @@ lockReady: ${lockReady}
 aim: ${aimX? 'yes':'no'}
 pinch: ${smoothedRatio.toFixed(3)}
 triggerLocked: ${triggerLocked}
+device: ${IS_IPAD?'iPad':(IS_IPHONE?'iPhone':'other')}
+readyState: ${video.readyState}
+vw/vh: ${video.videoWidth}x${video.videoHeight}
         `.trim();
       }
 
@@ -1172,13 +1197,16 @@ triggerLocked: ${triggerLocked}
 
     // Init
     let hands=null, camera=null;
+    let triedPlayOnce = false;
 
-    async function ensureVideoPlays(){
+    async function tryPlayOnceInGesture(){
+      if(triedPlayOnce) return;
+      triedPlayOnce = true;
       try{
         video.muted = true;
         video.setAttribute('playsinline', '');
         video.setAttribute('webkit-playsinline', '');
-        await video.play();
+        await video.play(); // ✅ 只在按钮点击后做一次（用户手势内）
       }catch{}
       updateVideoReady();
     }
@@ -1186,13 +1214,17 @@ triggerLocked: ${triggerLocked}
     async function start(){
       statusEl.textContent = '请求摄像头...';
       resizeTwice();
-
       render(false,false,false);
+
+      // ✅ iPad 降一点压力：更稳（不改计分/射击逻辑）
+      const handsComplexity = IS_IPAD ? 0 : 1;
+      const camW = IS_IPAD ? 480 : 640;
+      const camH = IS_IPAD ? 360 : 480;
 
       hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
       hands.setOptions({
         maxNumHands:2,
-        modelComplexity:1,
+        modelComplexity:handsComplexity,
         minDetectionConfidence:0.7,
         minTrackingConfidence:0.7
       });
@@ -1239,16 +1271,27 @@ triggerLocked: ${triggerLocked}
 
       video.style.transform = 'scaleX(-1) translateZ(0)';
 
+      // ✅ 先建 Camera，再等待进入 playing（避免 onFrame await play() 堵住）
       camera = new Camera(video, {
         onFrame: async()=>{
-          if(!videoReady) await ensureVideoPlays();
+          // ✅ 关键修复：不在这里 await play()
+          if(!videoReady) return;
           await hands.send({image:video});
         },
-        width:640, height:480, facingMode:'user'
+        width:camW, height:camH, facingMode:'user'
       });
 
       await camera.start();
-      await ensureVideoPlays();
+
+      // ✅ 用户手势内只 play 一次，避免后续随机卡住
+      await tryPlayOnceInGesture();
+
+      // ✅ 等待 video 真的 ready（iPad 偶发慢就会在这里“可控地等”）
+      statusEl.textContent = '加载摄像头画面...';
+      await waitVideoPlaying(7000).catch(()=>{ /* 允许继续，让 overlay 提示 */ });
+
+      updateVideoReady();
+      statusEl.textContent = videoReady ? '等待双手...' : '等待摄像头画面…';
     }
 
     // ✅ 必须先点击按钮解锁音频，再启动摄像头/游戏
@@ -1262,6 +1305,7 @@ triggerLocked: ${triggerLocked}
         gateBtn.disabled = false;
         return;
       }
+
       startGate.style.display = 'none';
 
       start().catch(e=>{
