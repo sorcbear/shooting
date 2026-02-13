@@ -618,67 +618,89 @@
     }
 
     /* ✅ 说明文字：移到正方形上方 + 更大 */
-    function drawTopMessage(lines){
-      const half = targetSquareHalf * DPR;
+function drawTopMessage(lines){
+  const half = targetSquareHalf * DPR;
 
-      const safeTop = 14*DPR + (12*DPR); // 给顶部留一点边
-      const maxY = (cy - half) - 10*DPR; // 正方形上沿再往上 10px
-      if(maxY <= safeTop) return;
+  // 顶部安全区 & 正方形上沿
+  const safeTop = 14*DPR + (12*DPR);
+  const maxY = (cy - half) - 10*DPR; // 正方形上方 10px
+  if(maxY <= safeTop) return;
 
-      // 字号：更大一些（原先是基于 boxH*0.22，这里提高）
-      const fontPx = Math.min(74*DPR, Math.max(34*DPR, Math.round((2*half) * 0.26)));
-      const lineH  = fontPx * 1.12;
+  // 可用区域
+  const areaH = Math.max(1, maxY - safeTop);
+  const maxW = Math.max(1, W - 24*DPR);
 
-      ctx.save();
-      ctx.font = `900 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+  // 初始字号（比之前小一点，更稳）
+  let fontPx = Math.min(52*DPR, Math.max(26*DPR, Math.round((2*half) * 0.18)));
+  let lineH  = fontPx * 1.18;
 
-      let maxTextW = 0;
-      for(const t of lines) maxTextW = Math.max(maxTextW, ctx.measureText(t).width);
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
 
-      const padX = 14*DPR;
-      const padY = 10*DPR;
+  // 反复缩放，直到宽/高都放得下
+  for(let iter=0; iter<18; iter++){
+    ctx.font = `900 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
 
-      const bw = Math.min(W - 24*DPR, maxTextW + padX*2);
-      const bh = lines.length*lineH + padY*2;
+    let maxTextW = 0;
+    for(const t of lines) maxTextW = Math.max(maxTextW, ctx.measureText(t).width);
 
-      // 把文字块放在 safeTop ~ maxY 区间内垂直居中
-      const areaH = Math.max(1, maxY - safeTop);
-      const by = safeTop + (areaH - bh)/2;
-      const bx = cx - bw/2;
+    const padX = 14*DPR;
+    const padY = 10*DPR;
 
-      ctx.fillStyle = 'rgba(255,255,255,0.94)';
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = 'rgba(0,0,0,0.10)';
-      ctx.lineWidth = 2*DPR;
-      ctx.strokeRect(bx, by, bw, bh);
+    const bw = Math.min(maxW, maxTextW + padX*2);
+    const bh = lines.length*lineH + padY*2;
 
-      ctx.fillStyle = '#000';
-      for(let i=0;i<lines.length;i++){
-        const yy = by + padY + lineH/2 + i*lineH;
-        ctx.fillText(lines[i], cx, yy);
-      }
-      ctx.restore();
+    // 宽或高超了就继续缩小
+    if((maxTextW + padX*2) > maxW || bh > areaH){
+      fontPx *= 0.90;
+      lineH = fontPx * 1.18;
+      continue;
     }
 
-    function drawGuideOverlay(haveLeft, haveRight, haveSight){
-      let msg = '';
-      if(!videoReady){
-        msg = '等待摄像头画面…';
-      }else if(!haveLeft || !haveRight || !haveSight){
-        msg = '距离屏幕50cm以上，在屏幕前方移动双手位置，直到屏幕上露出瞄准器';
-      }else if(!firstShotDone){
-        if(!lockReady) msg = '请对准靶心保持一下';
-        else msg = '已锁定 ✅\n捏合击发校准';
-      }else{
-        msg = '';
-      }
-      if(!msg) return;
+    // 计算摆放位置：在 safeTop~maxY 中垂直居中
+    const bx = cx - bw/2;
+    const by = safeTop + (areaH - bh)/2;
 
-      const lines = msg.split('\n');
-      drawTopMessage(lines);
+    // ✅ 白底提示块（不要任何灰色边框）
+    ctx.fillStyle = 'rgba(255,255,255,0.94)';
+    ctx.fillRect(bx, by, bw, bh);
+
+    // 画字
+    ctx.fillStyle = '#000';
+    for(let i=0;i<lines.length;i++){
+      const yy = by + padY + lineH/2 + i*lineH;
+      ctx.fillText(lines[i], cx, yy);
     }
+    ctx.restore();
+    return;
+  }
+
+  // 兜底：如果实在放不下，就不画（避免超出屏幕）
+  ctx.restore();
+}
+
+
+function drawGuideOverlay(haveLeft, haveRight, haveSight){
+  let msg = '';
+
+  if(!videoReady){
+    msg = '等待摄像头画面…';
+  }else if(!haveLeft || !haveRight || !haveSight){
+    // ✅ 按你要求：两行，放在正方形上方
+    msg = '双手距离屏幕50cm以上\n移动位置，直到屏幕上出现瞄准器';
+  }else if(!firstShotDone){
+    if(!lockReady) msg = '请对准靶心保持一下';
+    else msg = '已锁定 ✅\n捏合击发校准';
+  }else{
+    msg = '';
+  }
+
+  if(!msg) return;
+  const lines = msg.split('\n');
+  drawTopMessage(lines);
+}
+
 
     function render(haveLeft, haveRight, haveSight){
       drawTarget();
