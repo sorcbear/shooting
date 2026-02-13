@@ -631,58 +631,34 @@
     }
 
 function drawTriggerIcon(x, y){
-  // ✅ 更大一点 + 更简线条（黑白、直观）
-  const w = 60 * DPR;     // 原来大概 38*DPR -> 60*DPR
-  const h = 40 * DPR;     // 原来 26*DPR -> 40*DPR
-  const r = 6  * DPR;
+  // ✅ 造型：粗黑圆环 + 竖向椭圆（与你给的 SVG 一致）
+  // 只画线条，不填充；不影响任何识别/触发逻辑
+  const ringR   = 30 * DPR;     // 圆环半径（可微调）
+  const ovalW   = 22 * DPR;     // 椭圆宽
+  const ovalH   = 70 * DPR;     // 椭圆高
+  const stroke  = 6  * DPR;     // 线条粗细（可微调）
+  const yShift  = 12 * DPR;     // 椭圆整体向下偏移，让它穿过圆环下半部
 
   ctx.save();
   ctx.translate(x, y);
-
-  // 背板：白底黑框
-  ctx.lineWidth = 3.5 * DPR;
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.strokeStyle = '#000';
-
-  // 圆角矩形
-  const x0 = -w/2, y0 = -h/2;
-  ctx.beginPath();
-  ctx.moveTo(x0+r, y0);
-  ctx.arcTo(x0+w, y0,   x0+w, y0+h, r);
-  ctx.arcTo(x0+w, y0+h, x0,   y0+h, r);
-  ctx.arcTo(x0,   y0+h, x0,   y0,   r);
-  ctx.arcTo(x0,   y0,   x0+w, y0,   r);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-
-  // ✅ 更简单的“扳机”符号：一条横条 + 一个L形扳机 + 一个小圆点
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = 5 * DPR;
+  ctx.lineWidth = stroke;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // 上横条（像枪身）
+  // 圆环
   ctx.beginPath();
-  ctx.moveTo(-w*0.28, -h*0.12);
-  ctx.lineTo( w*0.22, -h*0.12);
+  ctx.arc(0, 0, ringR, 0, Math.PI * 2);
   ctx.stroke();
 
-  // L形扳机（更像“扣扳机”）
+  // 竖向椭圆（穿过圆环）
   ctx.beginPath();
-  ctx.moveTo(-w*0.08, -h*0.02);
-  ctx.lineTo(-w*0.08,  h*0.18);
-  ctx.lineTo( w*0.06,  h*0.18);
+  ctx.ellipse(0, yShift, ovalW/2, ovalH/2, 0, 0, Math.PI * 2);
   ctx.stroke();
-
-  // 触发点（小圆点）
-  ctx.fillStyle = '#000';
-  ctx.beginPath();
-  ctx.arc(w*0.26, 0, 5.2*DPR, 0, Math.PI*2);
-  ctx.fill();
 
   ctx.restore();
 }
+
 
 
     // Draw
@@ -1088,7 +1064,7 @@ function drawTriggerIcon(x, y){
     const SHOT_COOLDOWN_MS = 450;
     let lastShotTs = 0;
 
-    const PINCH_DISTANCE_ON  = 0.20;
+    const PINCH_DISTANCE_ON  = 0.22;
     const PINCH_DISTANCE_OFF = 0.26;
 
     const PINCH_ON_FRAMES  = 2;
