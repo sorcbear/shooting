@@ -945,8 +945,27 @@ function showTenTitle(sum){
     spBack.addEventListener('click', closeSharePreview);
     sharePreview.querySelector('.sp-backdrop').addEventListener('click', closeSharePreview);
 
-    spDownload.addEventListener('click', ()=>{
+    spDownload.addEventListener('click', async ()=>{
       if(!spBlobUrl) return;
+
+      try{
+        const blob = await fetch(spBlobUrl).then(r=>r.blob());
+
+    // ✅ 如果支持 Web Share Level 2
+        if(navigator.canShare && navigator.canShare({ files:[new File([blob], spDownloadName, {type:'image/png'})] })){
+          const file = new File([blob], spDownloadName, { type:'image/png' });
+          await navigator.share({
+            files: [file],
+            title: 'Air Finger Rifle 成绩',
+          });
+          return;
+        }
+
+      }catch(e){
+        console.log('share failed, fallback to download');
+      }
+
+  // 桌面浏览器 fallback
       const a = document.createElement('a');
       a.href = spBlobUrl;
       a.download = spDownloadName || `finger-rifle-${Date.now()}.png`;
